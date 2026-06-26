@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/docs/" />
+  <Folder Name="/docs/specs/">
+    <File Path="docs/specs/spec-draft-v1.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/FileManager/FileManager.csproj" />
   </Folder>
