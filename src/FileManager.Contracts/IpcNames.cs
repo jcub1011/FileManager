@@ -37,14 +37,20 @@ public static class IpcNames
     public static string GetWindowsPipePath() => $@"\\.\pipe\{GetWindowsPipeName()}";
 
     /// <summary>
-    /// The Unix domain socket path: <c>$XDG_RUNTIME_DIR/filemanager.sock</c>, falling back to
-    /// <c>/tmp</c> when <c>XDG_RUNTIME_DIR</c> is unset.
+    /// The Unix domain socket path: <c>$XDG_RUNTIME_DIR/filemanager.sock</c>. When
+    /// <c>XDG_RUNTIME_DIR</c> is unset, falls back to a <em>per-user</em> subdirectory under
+    /// <c>/tmp</c> (<c>/tmp/filemanager-&lt;user&gt;/filemanager.sock</c>) so the socket does not
+    /// sit directly in world-writable <c>/tmp</c> where another local user could squat the path.
+    /// (The M6 transport is responsible for creating that directory with owner-only permissions.)
     /// </summary>
     public static string GetUnixSocketPath()
     {
         string? runtimeDir = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
-        string baseDir = !string.IsNullOrEmpty(runtimeDir) ? runtimeDir : "/tmp";
-        return Path.Combine(baseDir, UnixSocketFileName);
+        if (!string.IsNullOrEmpty(runtimeDir))
+            return Path.Combine(runtimeDir, UnixSocketFileName);
+
+        string perUserDir = Path.Combine("/tmp", $"filemanager-{Environment.UserName}");
+        return Path.Combine(perUserDir, UnixSocketFileName);
     }
 
     /// <summary>

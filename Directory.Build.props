@@ -1,6 +1,6 @@
 <Project>
   <!--
-    Shared build settings for all FilePipeline projects. Individual csproj files
+    Shared build settings for all FileManager projects. Individual csproj files
     inherit these automatically (MSBuild walks up the directory tree).
   -->
   <PropertyGroup>
