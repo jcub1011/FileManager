@@ -24,12 +24,20 @@ public sealed class WorkerPoolTests
     public async Task NeverExceedsMaxWorkers_AndSaturates()
     {
         const int maxWorkers = 4;
-        const int jobCount = 40;
+        const int jobCount = 40; // an exact multiple of maxWorkers, so every batch fills the barrier
         var queue = new JobQueue(capacity: 1024);
 
         int concurrent = 0;
         int peak = 0;
+        int timeouts = 0;
         var sync = new object();
+
+        // Force saturation deterministically rather than relying on a sleep/overlap window (which is
+        // racy on a loaded CI runner): a Barrier of maxWorkers parties only releases once that many
+        // handlers are simultaneously in flight. If the pool could run fewer than maxWorkers at once,
+        // the rendezvous never completes and SignalAndWait times out (recorded), so the test fails
+        // fast instead of hanging. The Barrier auto-resets per batch.
+        using var saturated = new Barrier(maxWorkers);
 
         JobResult Handler(JobRequest req, CancellationToken ct)
         {
@@ -39,7 +47,9 @@ public sealed class WorkerPoolTests
                 peak = Math.Max(peak, concurrent);
             }
 
-            Thread.Sleep(15); // overlap window so the peak can actually reach MaxWorkers
+            // Block until maxWorkers handlers are concurrently here — proves the pool saturates.
+            if (!saturated.SignalAndWait(TimeSpan.FromSeconds(30)))
+                Interlocked.Increment(ref timeouts);
 
             lock (sync)
                 concurrent--;
@@ -54,8 +64,9 @@ public sealed class WorkerPoolTests
 
         await pool.DrainAsync();
 
+        Assert.Equal(0, timeouts); // every batch reached maxWorkers concurrency (saturated)
         Assert.True(peak <= maxWorkers, $"peak {peak} exceeded MaxWorkers {maxWorkers}");
-        Assert.Equal(maxWorkers, peak); // saturated: reached the bound
+        Assert.Equal(maxWorkers, peak); // saturated: reached the bound, never beyond it
         Assert.Equal(0, concurrent);
     }
 
