@@ -10,6 +10,9 @@ public sealed class ConflictResolverTests : IDisposable
 {
     private readonly TempDir _temp = new("conflict");
     private readonly SystemFileOperations _files = new();
+    private readonly ConflictResolver _resolver;
+
+    public ConflictResolverTests() => _resolver = new ConflictResolver(_files);
 
     public void Dispose() => _temp.Dispose();
 
@@ -27,8 +30,8 @@ public sealed class ConflictResolverTests : IDisposable
     public void NoExistingFile_IsPlainWrite()
     {
         string dest = _temp.Path("out", "a.txt");
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Overwrite);
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Overwrite);
 
         Assert.Equal(TargetAction.Written, o.Action);
         Assert.Equal(dest, o.FinalPath);
@@ -39,8 +42,8 @@ public sealed class ConflictResolverTests : IDisposable
     public void Overwrite_ReplacesExisting()
     {
         string dest = _temp.WriteFile("out/a.txt", "old");
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Overwrite);
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Overwrite);
 
         Assert.Equal(TargetAction.Overwritten, o.Action);
         Assert.True(o.Overwrite);
@@ -53,8 +56,8 @@ public sealed class ConflictResolverTests : IDisposable
         string dest = _temp.WriteFile("out/a.txt", "old");
         File.SetLastWriteTimeUtc(dest, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             ConflictResolution.OverwriteIfNewer);
 
         Assert.Equal(TargetAction.Overwritten, o.Action);
@@ -67,8 +70,8 @@ public sealed class ConflictResolverTests : IDisposable
         string dest = _temp.WriteFile("out/a.txt", "new");
         File.SetLastWriteTimeUtc(dest, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             ConflictResolution.OverwriteIfNewer);
 
         Assert.Equal(TargetAction.Skipped, o.Action);
@@ -79,8 +82,8 @@ public sealed class ConflictResolverTests : IDisposable
     {
         string dest = _temp.WriteFile("out/a.txt", "existing");
 
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.RenameSuffix);
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.RenameSuffix);
 
         Assert.Equal(TargetAction.RenamedSuffix, o.Action);
         Assert.Equal(_temp.Path("out", "a (1).txt"), o.FinalPath);
@@ -93,8 +96,8 @@ public sealed class ConflictResolverTests : IDisposable
         string dest = _temp.WriteFile("out/a.txt", "existing");
         _temp.WriteFile("out/a (1).txt", "taken");
 
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.RenameSuffix);
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.RenameSuffix);
 
         Assert.Equal(_temp.Path("out", "a (2).txt"), o.FinalPath);
     }
@@ -104,8 +107,8 @@ public sealed class ConflictResolverTests : IDisposable
     {
         string dest = _temp.WriteFile("out/a.txt", "existing");
 
-        ConflictOutcome o = ConflictResolver.Resolve(
-            _files, dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Skip);
+        ConflictOutcome o = _resolver.Resolve(
+            dest, MetaWithModified(DateTime.UtcNow), ConflictResolution.Skip);
 
         Assert.Equal(TargetAction.Skipped, o.Action);
         Assert.Null(o.FinalPath);

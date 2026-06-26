@@ -15,7 +15,7 @@ namespace FileManager.Core.Transformers;
 /// exit (outside <see cref="TransformerStep.SuccessExitCodes"/>) or a timeout aborts the chain; the
 /// original Source is never touched and the caller tears the workspace down.
 /// </summary>
-public sealed class TransformerRunner(IFileOperations files, IProcessRunner processRunner)
+public sealed class TransformerRunner(IFileOperations files, IProcessRunner processRunner) : ITransformerRunner
 {
     private static readonly IReadOnlyList<int> DefaultSuccessCodes = new[] { 0 };
 

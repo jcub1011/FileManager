@@ -52,7 +52,10 @@ promise real (durability across crashes is M4).
       half-finished set for the file.
 - [ ] `StagingArea` per Job; `StageOverwrites` move-before-rename + restore/discard.
 - [ ] `ITrashService` with `WindowsRecycleBin` (`IFileOperation` via COM interop) and `LinuxTrash`
-      (FreeDesktop `~/.local/share/Trash/` with `.trashinfo`).
+      (FreeDesktop `~/.local/share/Trash/` with `.trashinfo`). Native `OnSuccess=MoveToTrash` lands by
+      having `SourceDisposer` consume `ITrashService` (or by a native `ISourceDisposer`) — the M1
+      placeholder trash is swapped behind the existing `ISourceDisposer` seam, not by editing
+      `JobEngine`. See the [engine service & dependency pattern](README.md#engine-service--dependency-pattern).
 - [ ] `MirrorPlanner`: enumerate aggregated Source set vs Target set, identify surplus, route to trash;
       integrate as a post-placement step under `SyncMode=Mirror`.
 - [ ] `MetadataCopier`: timestamps + Unix mode bits / Windows ACLs best-effort; detect pre-copy loss

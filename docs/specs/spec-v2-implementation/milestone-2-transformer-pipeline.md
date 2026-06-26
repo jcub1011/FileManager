@@ -62,13 +62,20 @@ land in M3; M2 wires the abort hook and cleans the temp workspace).
 
 ```
 src/FileManager.Core/Transformers/
-  TransformerRunner.cs, TempWorkspace.cs, ProcessInvoker.cs,
+  ITransformerRunner.cs + TransformerRunner.cs, TempWorkspace.cs,
+  IProcessRunner.cs + SystemProcessRunner.cs,
   ArgumentParser.cs (Literal), ShellCommandBuilder.cs (Shell), StepResult.cs
 src/FileManager.Core/Tokens/
   TokenExpander.cs (extended with step tokens)
 src/FileManager.Core/Jobs/
   JobEngine.cs (Phase-3 integration + abort hook)
 ```
+
+Per the [engine service & dependency pattern](README.md#engine-service--dependency-pattern),
+`TransformerRunner` is an `ITransformerRunner` injected into `JobEngine`, and process launching sits
+behind `IProcessRunner` (real `SystemProcessRunner`; tests inject a `FakeProcessRunner`). The
+argument/shell builders (`ArgumentParser`, `ShellCommandBuilder`) and the token expander stay
+`static` — they are pure functions.
 
 ## Acceptance criteria
 

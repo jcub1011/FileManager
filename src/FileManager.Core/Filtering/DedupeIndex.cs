@@ -11,18 +11,15 @@ namespace FileManager.Core.Filtering;
 /// <remarks>
 /// Appendix B open item — M1 <b>computes on demand</b> (hash the source, then stream-hash each Target
 /// file) rather than maintaining a persisted Target index. This is O(files × size) per scan; a cached
-/// index is a later optimization.
+/// index is a later optimization that can be slotted in behind <see cref="IDedupeIndex"/>.
 /// </remarks>
-public static class DedupeIndex
+public sealed class DedupeIndex(IFileOperations files) : IDedupeIndex
 {
     /// <summary>
     /// Whether a file with the same SHA256 as <paramref name="sourcePath"/> already exists under any
     /// of <paramref name="targets"/>. Unreadable Target files are skipped rather than failing the check.
     /// </summary>
-    public static bool ExistsInTargets(
-        IFileOperations files,
-        string sourcePath,
-        IReadOnlyList<TargetSpec> targets)
+    public bool ExistsInTargets(string sourcePath, IReadOnlyList<TargetSpec> targets)
     {
         string sourceHash = HashUtil.ComputeSha256(files, sourcePath);
 

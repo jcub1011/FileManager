@@ -16,14 +16,13 @@ public sealed record DispositionOutcome(OnSuccess Action, string? ResultPath);
 /// a local <c>trash/</c> folder (timestamped to avoid collisions). The native Recycle Bin / FreeDesktop
 /// Trash integration lands in M3.
 /// </remarks>
-public static class SourceDisposer
+public sealed class SourceDisposer(IFileOperations files) : ISourceDisposer
 {
     /// <summary>
     /// Applies the disposition. <paramref name="trashRoot"/> is the placeholder trash folder used for
     /// <see cref="OnSuccess.MoveToTrash"/>; <paramref name="now"/> stamps the trashed name.
     /// </summary>
-    public static DispositionOutcome Dispose(
-        IFileOperations files,
+    public DispositionOutcome Dispose(
         string sourcePath,
         PolicySet policies,
         string trashRoot,
@@ -41,13 +40,13 @@ public static class SourceDisposer
             case OnSuccess.MoveToArchive:
                 string archive = policies.ArchiveFolder
                     ?? throw new InvalidOperationException("MoveToArchive requires ArchiveFolder.");
-                string archived = MoveInto(files, sourcePath, archive, prefix: null);
+                string archived = MoveInto(sourcePath, archive, prefix: null);
                 return new DispositionOutcome(OnSuccess.MoveToArchive, archived);
 
             case OnSuccess.MoveToTrash:
                 // Placeholder (M3 replaces with native trash). Stamp to keep trashed names unique.
                 string stamp = now.UtcDateTime.ToString("yyyyMMdd-HHmmss");
-                string trashed = MoveInto(files, sourcePath, trashRoot, prefix: stamp + "-");
+                string trashed = MoveInto(sourcePath, trashRoot, prefix: stamp + "-");
                 return new DispositionOutcome(OnSuccess.MoveToTrash, trashed);
 
             default:
@@ -59,20 +58,20 @@ public static class SourceDisposer
     /// Moves <paramref name="sourcePath"/> into <paramref name="destDir"/> (created if needed),
     /// keeping its base name (optionally prefixed) and avoiding collisions with a <c>(n)</c> suffix.
     /// </summary>
-    private static string MoveInto(IFileOperations files, string sourcePath, string destDir, string? prefix)
+    private string MoveInto(string sourcePath, string destDir, string? prefix)
     {
         files.CreateDirectory(destDir);
         string fileName = (prefix ?? string.Empty) + Path.GetFileName(sourcePath);
         string dest = Path.Combine(destDir, fileName);
 
         if (files.FileExists(dest))
-            dest = FindFreePath(files, dest);
+            dest = FindFreePath(dest);
 
         files.Move(sourcePath, dest, overwrite: false);
         return dest;
     }
 
-    private static string FindFreePath(IFileOperations files, string path)
+    private string FindFreePath(string path)
     {
         string dir = Path.GetDirectoryName(path) ?? string.Empty;
         (string stem, string ext) = TokenExpander.SplitName(Path.GetFileName(path));
