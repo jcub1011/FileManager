@@ -68,16 +68,25 @@ placement, driven by a programmatic "process this path" entrypoint (real trigger
 src/FileManager.Core/Jobs/
   Job.cs, JobState.cs, JobResult.cs, JobEngine.cs, IngestionContext.cs
 src/FileManager.Core/Filtering/
-  FilterEvaluator.cs, GlobMatcher.cs, AttributeChecks.cs, DedupeIndex.cs
+  IFilterEvaluator.cs + FilterEvaluator.cs, GlobMatcher.cs, AttributeChecks.cs,
+  IDedupeIndex.cs + DedupeIndex.cs
 src/FileManager.Core/Routing/
-  TargetResolver.cs, ConflictResolver.cs
+  TargetResolver.cs, IConflictResolver.cs + ConflictResolver.cs
 src/FileManager.Core/IO/
   AtomicFileWriter.cs (copy-to-temp + rename, streamed), PathNormalizer.cs
 src/FileManager.Core/Tokens/
   TokenExpander.cs (filename tokens)
 src/FileManager.Core/Disposition/
-  SourceDisposer.cs (basic OnSuccess)
+  ISourceDisposer.cs + SourceDisposer.cs (basic OnSuccess)
 ```
+
+The phase collaborators that perform I/O or carry policy — `FilterEvaluator`, `DedupeIndex`,
+`ConflictResolver`, `SourceDisposer` (and M2's `TransformerRunner`) — are **interface-backed services
+injected into `JobEngine`** per the [engine service & dependency pattern](README.md#engine-service--dependency-pattern):
+they take `IFileOperations` (or each other) through their constructors rather than as per-call static
+arguments, so the orchestrator can be tested with fakes. The pure helpers (`TargetResolver`,
+`GlobMatcher`, `AttributeChecks`, `PathNormalizer`, `TokenExpander`, `AtomicFileWriter`) stay
+`static`. `ISourceDisposer` is also the seam M3 swaps to deliver native-trash disposition.
 
 ## Acceptance criteria
 

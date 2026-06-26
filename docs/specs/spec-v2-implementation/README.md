@@ -31,6 +31,33 @@ projects.
 | `tests/FileManager.Core.Tests` | Unit tests for the engine. | M0 |
 | `tests/FileManager.Integration.Tests` | End-to-end acceptance tests (spec §12). | M9 |
 
+### Engine service & dependency pattern
+
+`FileManager.Core` follows a **functional-core / imperative-shell** design. Two kinds of code live in
+the engine and they are wired differently — apply this consistently across all milestones:
+
+- **Side-effecting / business-logic collaborators are interface-backed services.** Any class that
+  performs I/O, spawns processes, talks to the OS, or encapsulates a swappable policy is defined
+  behind an interface (`IFileOperations`, `IProcessRunner`, `ILogSink`, `IFilterEvaluator`,
+  `IDedupeIndex`, `ITransformerRunner`, `IConflictResolver`, `ISourceDisposer`, and the M3+
+  `IVerifier` / `ITrashService` / etc.) and takes its dependencies through its **constructor**. The
+  `JobEngine` orchestrator holds these collaborators as interfaces so the lifecycle can be unit-tested
+  with fakes (e.g. a `FakeProcessRunner`, a reject-all `IFilterEvaluator`) without touching the real
+  filesystem or launching subprocesses. New phase logic that does I/O or carries policy should be
+  added as such a service, **not** as a `static` method that takes an `IFileOperations` parameter.
+- **Pure functions stay `static`.** Stateless, deterministic helpers with no side effects
+  (`PathNormalizer`, `TokenExpander`, `TargetResolver`, `GlobMatcher`, `DurationParser`, `HashUtil`,
+  `ProfileValidator`, `ProfileSerializer`, `AtomicFileWriter`, …) remain `static`. Putting these
+  behind interfaces buys no testability or substitutability and only adds ceremony.
+
+**Wiring is manual** — plain constructor composition in `JobEngine` (and, from M6, in the
+`FileManager.Service` host). There is **no DI container**: `Microsoft.Extensions.DependencyInjection`
+is AOT-compatible for explicit registration, but adding it would violate the rule that
+`FileManager.Core` / `FileManager.Contracts` stay dependency-free and reflection-free. `JobEngine`
+exposes a full constructor that accepts every collaborator interface (the seam tests and future host
+use this) plus a convenience constructor that builds the standard implementations over an
+`IFileOperations`, so call sites that don't need to substitute anything stay terse.
+
 ## Milestones
 
 | # | File | Title | Depends on |
