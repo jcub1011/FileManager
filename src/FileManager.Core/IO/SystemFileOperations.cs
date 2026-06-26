@@ -60,6 +60,9 @@ public sealed class SystemFileOperations : IFileOperations
     public void Move(string sourcePath, string destPath, bool overwrite) =>
         File.Move(sourcePath, destPath, overwrite);
 
+    public void SetLastWriteTimeUtc(string path, DateTime lastWriteTimeUtc) =>
+        File.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
+
     public void Delete(string path) => File.Delete(path);
 
     public void DeleteDirectory(string path, bool recursive)

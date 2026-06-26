@@ -2,6 +2,7 @@ using System.IO;
 using FileManager.Core.IO;
 using FileManager.Core.Profiles;
 using FileManager.Core.Tokens;
+using FileManager.Core.Trash;
 
 namespace FileManager.Core.Disposition;
 
@@ -12,12 +13,26 @@ public sealed record DispositionOutcome(OnSuccess Action, string? ResultPath);
 /// Phase 6 source disposition (§4) per <see cref="OnSuccess"/>.
 /// </summary>
 /// <remarks>
-/// <see cref="OnSuccess.MoveToTrash"/> is an M1 <b>placeholder</b>: it performs a recoverable move into
-/// a local <c>trash/</c> folder (timestamped to avoid collisions). The native Recycle Bin / FreeDesktop
-/// Trash integration lands in M3.
+/// <see cref="OnSuccess.MoveToTrash"/> delegates to an injected <see cref="ITrashService"/> (§5.3 —
+/// the native Recycle Bin / FreeDesktop Trash). When none is supplied the disposer falls back to a
+/// local <c>trash/</c> folder rooted at the <c>trashRoot</c> argument, matching the original M1
+/// placeholder behavior so existing call sites stay source-compatible.
 /// </remarks>
-public sealed class SourceDisposer(IFileOperations files) : ISourceDisposer
+public sealed class SourceDisposer : ISourceDisposer
 {
+    private readonly IFileOperations files;
+    private readonly ITrashService? _trash;
+
+    /// <summary>
+    /// Creates a disposer. When <paramref name="trash"/> is null, <see cref="OnSuccess.MoveToTrash"/>
+    /// uses a local-folder fallback rooted at the <c>trashRoot</c> passed to <see cref="Dispose"/>.
+    /// </summary>
+    public SourceDisposer(IFileOperations files, ITrashService? trash = null)
+    {
+        this.files = files;
+        _trash = trash;
+    }
+
     /// <summary>
     /// Applies the disposition. <paramref name="trashRoot"/> is the placeholder trash folder used for
     /// <see cref="OnSuccess.MoveToTrash"/>; <paramref name="now"/> stamps the trashed name.
@@ -44,7 +59,15 @@ public sealed class SourceDisposer(IFileOperations files) : ISourceDisposer
                 return new DispositionOutcome(OnSuccess.MoveToArchive, archived);
 
             case OnSuccess.MoveToTrash:
-                // Placeholder (M3 replaces with native trash). Stamp to keep trashed names unique.
+                if (_trash is not null)
+                {
+                    TrashResult result = _trash.MoveToTrash(sourcePath);
+                    if (!result.Ok)
+                        throw new IOException($"MoveToTrash failed: {result.Reason}");
+                    return new DispositionOutcome(OnSuccess.MoveToTrash, result.TrashedPath);
+                }
+
+                // Local-folder fallback (no native trash injected). Stamp to keep trashed names unique.
                 string stamp = now.UtcDateTime.ToString("yyyyMMdd-HHmmss");
                 string trashed = MoveInto(sourcePath, trashRoot, prefix: stamp + "-");
                 return new DispositionOutcome(OnSuccess.MoveToTrash, trashed);

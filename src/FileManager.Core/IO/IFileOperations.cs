@@ -43,6 +43,13 @@ public interface IFileOperations
     /// </summary>
     public void Move(string sourcePath, string destPath, bool overwrite);
 
+    /// <summary>
+    /// Sets a file's last-write time (UTC). Used by <see cref="FileManager.Core.Metadata.MetadataCopier"/>
+    /// to carry the source's modified time onto a freshly placed copy (best-effort; precision depends
+    /// on the destination filesystem).
+    /// </summary>
+    public void SetLastWriteTimeUtc(string path, DateTime lastWriteTimeUtc);
+
     /// <summary>Deletes a file. No-op if it is already absent.</summary>
     public void Delete(string path);
 
