@@ -108,6 +108,15 @@ public static class ProfileValidator
                     $"{prefix}.ExpectedOutputExtension",
                     "ExpectedOutputExtension is required when OutputMode is NewFile."));
             }
+
+            // A non-positive timeout would disable the spec-mandated forced timeout (§4 Phase 3),
+            // letting a hung transformer hang the Job forever; require an explicit positive value.
+            if (step.TimeoutSeconds <= 0)
+            {
+                errors.Add(new ValidationError(
+                    $"{prefix}.TimeoutSeconds",
+                    "TimeoutSeconds must be greater than zero."));
+            }
         }
     }
 

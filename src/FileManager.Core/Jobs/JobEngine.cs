@@ -154,10 +154,10 @@ public sealed class JobEngine
             // working copy, so the original source is never mutated; a step failure/timeout aborts.
             if (profile.Transformers is { Count: > 0 } transformers)
             {
-                workspace = TempWorkspace.Create(_files, _pipelineTempRoot, jobId);
                 TransformerChainResult chain;
                 try
                 {
+                    workspace = TempWorkspace.Create(_files, _pipelineTempRoot, jobId);
                     chain = _transformerRunner.Run(workspace, transformers, source, sourceRoot);
                 }
                 catch (Exception ex) when (IsIoError(ex))

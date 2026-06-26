@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using FileManager.Core.IO;
 using FileManager.Core.Profiles;
@@ -127,5 +128,23 @@ public sealed class TransformerRunnerTests : IDisposable
         Assert.False(result.Succeeded);
         Assert.Contains("not found", result.FailureReason);
         Assert.Empty(fake.Calls); // never launched
+    }
+
+    [Fact]
+    public void LaunchFailure_AbortsChain_WithoutThrowing()
+    {
+        // The executable exists (passes the existence gate) but the runner cannot launch it — e.g. a
+        // non-executable file. The thrown launch fault must resolve to a graceful chain abort.
+        string s = _temp.MakeDir("S");
+        string src = _temp.WriteFile("S/a.txt", "x");
+        TransformerStep[] steps = { TestTransformers.InPlace(1, StubExecutable.Path, "tag $step_input_path") };
+
+        using TempWorkspace ws = NewWorkspace();
+        var runner = new TransformerRunner(
+            _files, new FakeProcessRunner(_ => throw new Win32Exception("cannot launch")));
+        TransformerChainResult result = runner.Run(ws, steps, src, s);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("could not launch", result.FailureReason);
     }
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using FileManager.Core.IO;
 using FileManager.Core.Profiles;
@@ -68,7 +69,19 @@ public sealed class TransformerRunner(IFileOperations files, IProcessRunner proc
             TokenContext context = BuildContext(currentInput, sourceRoot, outputPath);
             ProcessLaunchSpec spec = BuildLaunchSpec(step, context, workspace.Root);
 
-            ProcessRunResult run = processRunner.Run(spec);
+            ProcessRunResult run;
+            try
+            {
+                run = processRunner.Run(spec);
+            }
+            catch (Exception ex) when (
+                ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                // The executable exists (gated above) but could not be launched — e.g. it is not an
+                // executable image / lacks the execute bit. Treat it as a graceful chain abort rather
+                // than letting the exception escape the Job.
+                return Abort(stepResults, $"Step {step.Step} ({step.Name}) could not launch: {ex.Message}");
+            }
             bool succeeded = !run.TimedOut && IsSuccessCode(run.ExitCode, step.SuccessExitCodes);
 
             stepResults.Add(new StepResult
