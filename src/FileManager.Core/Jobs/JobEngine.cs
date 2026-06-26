@@ -18,20 +18,53 @@ public sealed class JobEngine
 {
     private readonly IFileOperations _files;
     private readonly ILogSink _log;
-    private readonly FilterEvaluator _evaluator;
-    private readonly TransformerRunner _transformerRunner;
+    private readonly IFilterEvaluator _evaluator;
+    private readonly ITransformerRunner _transformerRunner;
+    private readonly IConflictResolver _conflictResolver;
+    private readonly ISourceDisposer _sourceDisposer;
     private readonly string _trashDirectory;
     private readonly string _pipelineTempRoot;
 
-    public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
+    /// <summary>
+    /// Full constructor wiring the engine to its phase collaborators. Tests use this to inject fakes
+    /// and exercise the orchestration in isolation; production code typically uses the convenience
+    /// constructor below, which builds the standard implementations.
+    /// </summary>
+    public JobEngine(
+        IFileOperations files,
+        ILogSink log,
+        IFilterEvaluator evaluator,
+        ITransformerRunner transformerRunner,
+        IConflictResolver conflictResolver,
+        ISourceDisposer sourceDisposer,
+        JobEngineOptions? options = null)
     {
         _files = files;
         _log = log;
-        _evaluator = new FilterEvaluator(files);
-        _transformerRunner = new TransformerRunner(files, processRunner ?? new SystemProcessRunner());
+        _evaluator = evaluator;
+        _transformerRunner = transformerRunner;
+        _conflictResolver = conflictResolver;
+        _sourceDisposer = sourceDisposer;
         JobEngineOptions effective = options ?? new JobEngineOptions();
         _trashDirectory = effective.ResolveTrashDirectory();
         _pipelineTempRoot = effective.ResolvePipelineTempRoot();
+    }
+
+    /// <summary>
+    /// Convenience constructor that builds the standard phase collaborators over
+    /// <paramref name="files"/> (and <paramref name="processRunner"/>, defaulting to a real
+    /// <see cref="SystemProcessRunner"/>).
+    /// </summary>
+    public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
+        : this(
+            files,
+            log,
+            new FilterEvaluator(new DedupeIndex(files)),
+            new TransformerRunner(files, processRunner ?? new SystemProcessRunner()),
+            new ConflictResolver(files),
+            new SourceDisposer(files),
+            options)
+    {
     }
 
     /// <summary>
@@ -191,8 +224,8 @@ public sealed class JobEngine
                 foreach (TargetSpec target in profile.Targets)
                 {
                     string dest = TargetResolver.ResolveDestination(target, distRelativePath, distFileName, layout);
-                    ConflictOutcome plan = ConflictResolver.Resolve(
-                        _files, dest, distMeta, profile.Policies.ConflictResolution);
+                    ConflictOutcome plan = _conflictResolver.Resolve(
+                        dest, distMeta, profile.Policies.ConflictResolution);
 
                     if (plan.Action == TargetAction.Skipped)
                     {
@@ -245,8 +278,8 @@ public sealed class JobEngine
         DispositionOutcome disposition;
         try
         {
-            disposition = SourceDisposer.Dispose(
-                _files, source, profile.Policies, _trashDirectory, context.Now);
+            disposition = _sourceDisposer.Dispose(
+                source, profile.Policies, _trashDirectory, context.Now);
         }
         catch (Exception ex) when (IsIoError(ex))
         {

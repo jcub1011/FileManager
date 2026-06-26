@@ -12,13 +12,12 @@ namespace FileManager.Core.Filtering;
 /// <remarks>
 /// Regex uses the interpreted engine (no <see cref="RegexOptions.Compiled"/>) to stay AOT-clean.
 /// All rules except <c>ContentHashDedupe</c> operate purely on the <see cref="FilterCandidate"/>;
-/// dedupe is the one rule that reads the file system, via the injected <see cref="IFileOperations"/>.
+/// dedupe is the one rule that reads the file system, delegated to the injected
+/// <see cref="IDedupeIndex"/>.
 /// </remarks>
-public sealed class FilterEvaluator
+public sealed class FilterEvaluator(IDedupeIndex dedupe) : IFilterEvaluator
 {
-    private readonly IFileOperations _files;
-
-    public FilterEvaluator(IFileOperations files) => _files = files;
+    private readonly IDedupeIndex _dedupe = dedupe;
 
     /// <summary>
     /// Resolves the effective filters for a Source: per-Source filters <b>override</b> the global set
@@ -96,7 +95,7 @@ public sealed class FilterEvaluator
             return FilterDecision.Reject("MaxDepth");
 
         // Content-hash dedupe (the only rule that reads the file system).
-        if (filters.ContentHashDedupe && DedupeIndex.ExistsInTargets(_files, candidate.FullPath, targets))
+        if (filters.ContentHashDedupe && _dedupe.ExistsInTargets(candidate.FullPath, targets))
             return FilterDecision.Reject("ContentHashDedupe");
 
         return FilterDecision.Pass;

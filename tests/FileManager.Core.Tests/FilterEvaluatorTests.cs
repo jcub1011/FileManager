@@ -10,7 +10,7 @@ public sealed class FilterEvaluatorTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 25, 12, 0, 0, TimeSpan.Zero);
     private static readonly IReadOnlyList<TargetSpec> NoTargets = Array.Empty<TargetSpec>();
-    private readonly FilterEvaluator _eval = new(new SystemFileOperations());
+    private readonly FilterEvaluator _eval = new(new DedupeIndex(new SystemFileOperations()));
 
     private static FileMetadata Meta(
         long length = 100,

@@ -36,18 +36,14 @@ public sealed record ConflictOutcome(TargetAction Action, string? FinalPath, boo
 /// drives Targets in Profile source order, so first-writer-wins under <see cref="ConflictResolution.Overwrite"/>
 /// reflects source priority.
 /// </summary>
-public static class ConflictResolver
+public sealed class ConflictResolver(IFileOperations files) : IConflictResolver
 {
     /// <summary>
     /// Resolves how to write a file (whose metadata is <paramref name="incoming"/>) to
     /// <paramref name="destPath"/> under <paramref name="policy"/>. A free destination is always a
     /// plain <see cref="TargetAction.Written"/>.
     /// </summary>
-    public static ConflictOutcome Resolve(
-        IFileOperations files,
-        string destPath,
-        FileMetadata incoming,
-        ConflictResolution policy)
+    public ConflictOutcome Resolve(string destPath, FileMetadata incoming, ConflictResolution policy)
     {
         if (!files.FileExists(destPath))
             return new ConflictOutcome(TargetAction.Written, destPath, Overwrite: false);
@@ -64,7 +60,7 @@ public static class ConflictResolver
                     : ConflictOutcome.Skip;
 
             case ConflictResolution.RenameSuffix:
-                string renamed = FindFreeSuffixedPath(files, destPath);
+                string renamed = FindFreeSuffixedPath(destPath);
                 return new ConflictOutcome(TargetAction.RenamedSuffix, renamed, Overwrite: false);
 
             case ConflictResolution.Skip:
@@ -80,7 +76,7 @@ public static class ConflictResolver
     /// from 1. Stem/extension splitting is shared with <see cref="TokenExpander"/> so naming stays
     /// consistent with token expansion.
     /// </summary>
-    private static string FindFreeSuffixedPath(IFileOperations files, string destPath)
+    private string FindFreeSuffixedPath(string destPath)
     {
         string dir = Path.GetDirectoryName(destPath) ?? string.Empty;
         string fileName = Path.GetFileName(destPath);
