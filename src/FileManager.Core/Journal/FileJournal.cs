@@ -17,8 +17,8 @@ namespace FileManager.Core.Journal;
 /// first rewrites the file in place dropping every record that belongs to a Closed Job — the only
 /// records recovery still needs are those of still-open Jobs. This keeps the journal bounded under
 /// steady-state churn. Compaction closes the append writer, rewrites the file atomically (temp +
-/// replace), then reopens; it relies on the M4 single-writer assumption (M5 owns concurrency and will
-/// revisit compaction so it cannot race an active writer).</para>
+/// replace), then reopens. M5 makes every public operation concurrency-safe under a single lock (see
+/// <c>_gate</c>), so compaction can no longer race an active append.</para>
 /// <para>The journal path resolves from <see cref="ServiceConfig.JournalDirectory"/> (default a
 /// <c>journal/</c> folder under <see cref="ConfigPaths.GetConfigDirectory"/>), file name
 /// <see cref="DefaultJournalFileName"/>.</para>
@@ -37,6 +37,12 @@ public sealed class FileJournal : IJournal
     private readonly string _path;
     private readonly long _rotationSizeBytes;
     private readonly Func<string, IDurableAppendWriter> _writerFactory;
+
+    // Serializes every append/compaction/read so concurrent worker-pool Jobs (M5) cannot interleave a
+    // frame with another's, race compaction against an active append, or read a half-written tail. A
+    // single lock is sufficient: the per-record fsync already dominates the cost of a journal write, so
+    // the contention here is far cheaper than the durability barrier it guards.
+    private readonly object _gate = new();
 
     private IDurableAppendWriter _writer;
 
@@ -92,16 +98,23 @@ public sealed class FileJournal : IJournal
 
     public IReadOnlyList<OpenJobState> ReadOpenEntries()
     {
-        List<JournalRecord> records = ReadAll();
-        return FoldOpenJobs(records);
+        // Read under the same lock as writes so a concurrent append/compaction cannot tear the scan.
+        lock (_gate)
+        {
+            List<JournalRecord> records = ReadAll();
+            return FoldOpenJobs(records);
+        }
     }
 
     private void Append(JournalRecord record)
     {
-        CompactIfOversized();
         byte[] frame = JournalFraming.Encode(record);
-        _writer.Append(frame);
-        _writer.Flush(); // fsync per record — durability guarantee (§6.3).
+        lock (_gate)
+        {
+            CompactIfOversized();
+            _writer.Append(frame);
+            _writer.Flush(); // fsync per record — durability guarantee (§6.3).
+        }
     }
 
     // Reads every well-framed record from the file (tolerating a torn tail / absent file).
@@ -215,7 +228,11 @@ public sealed class FileJournal : IJournal
         }
     }
 
-    public void Dispose() => _writer.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+            _writer.Dispose();
+    }
 
     /// <summary>Mutable per-Job fold used while replaying the journal.</summary>
     private sealed class Accumulator
