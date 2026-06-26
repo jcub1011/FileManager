@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using FileManager.Core.IO;
 using FileManager.Core.Safety;
 using Xunit;
@@ -12,9 +13,14 @@ namespace FileManager.Core.Tests;
 /// </summary>
 public sealed class SpaceReservationLedgerTests
 {
-    // Distinct synthetic volume roots; the fake probe matches paths by longest prefix.
-    private const string VolA = @"C:\volA";
-    private const string VolB = @"C:\volB";
+    // Distinct synthetic volume roots, rooted per-OS so they normalize to real absolute paths on both
+    // Windows (C:\volA) and Linux (/volA) — a hard-coded "C:\volA" is not a rooted path on Linux, so
+    // the fake probe's prefix match would miss and every path would read as unconstrained.
+    private static readonly string VolA = Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", "volA");
+    private static readonly string VolB = Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", "volB");
+
+    // A path under a volume root, with the platform's separator (so the probe's prefix match works).
+    private static string Under(string volume, string name) => Path.Combine(volume, name);
 
     private static FakeFreeSpaceProbe Probe(params (string vol, long free)[] vols)
     {
@@ -30,10 +36,10 @@ public sealed class SpaceReservationLedgerTests
         // Capacity 100 on one volume; each Job wants 70 → only one fits at a time (the concurrency case).
         var ledger = new SpaceReservationLedger(Probe((VolA, 100)));
 
-        ReservationResult first = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\f1", 70) });
+        ReservationResult first = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "f1"), 70) });
         Assert.True(first.Ok);
 
-        ReservationResult second = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\f2", 70) });
+        ReservationResult second = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "f2"), 70) });
         Assert.False(second.Ok);
         Assert.NotNull(second.Reason);
         // The reason cites the already-reserved figure — what makes a concurrent second Job fail.
@@ -45,14 +51,14 @@ public sealed class SpaceReservationLedgerTests
     {
         var ledger = new SpaceReservationLedger(Probe((VolA, 100)));
 
-        ReservationResult first = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\f1", 70) });
+        ReservationResult first = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "f1"), 70) });
         Assert.True(first.Ok);
-        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\f2", 70) }).Ok);
+        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "f2"), 70) }).Ok);
 
         // Release the first; the bytes return to the pool.
         first.Handle!.Dispose();
 
-        ReservationResult third = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\f3", 70) });
+        ReservationResult third = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "f3"), 70) });
         Assert.True(third.Ok);
     }
 
@@ -62,8 +68,8 @@ public sealed class SpaceReservationLedgerTests
         // 100 free, 30 margin ⇒ usable 70. A 71-byte request must fail; a 70-byte one fits exactly.
         var ledger = new SpaceReservationLedger(Probe((VolA, 100)), marginBytes: 30);
 
-        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\big", 71) }).Ok);
-        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\fits", 70) }).Ok);
+        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "big"), 71) }).Ok);
+        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "fits"), 70) }).Ok);
     }
 
     [Fact]
@@ -75,15 +81,15 @@ public sealed class SpaceReservationLedgerTests
 
         ReservationResult result = ledger.TryReserve(new[]
         {
-            new SpaceRequest(VolA + @"\a", 50),
-            new SpaceRequest(VolB + @"\b", 200),
+            new SpaceRequest(Under(VolA, "a"), 50),
+            new SpaceRequest(Under(VolB, "b"), 200),
         });
 
         Assert.False(result.Ok);
         Assert.Contains("volB", result.Reason);
 
         // Proof nothing was reserved on VolA: a fresh full-capacity request on VolA now succeeds.
-        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\c", 100) }).Ok);
+        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "c"), 100) }).Ok);
     }
 
     [Fact]
@@ -93,13 +99,13 @@ public sealed class SpaceReservationLedgerTests
 
         ReservationResult result = ledger.TryReserve(new[]
         {
-            new SpaceRequest(VolA + @"\zero", 0),
-            new SpaceRequest(VolA + @"\neg", -5),
+            new SpaceRequest(Under(VolA, "zero"), 0),
+            new SpaceRequest(Under(VolA, "neg"), -5),
         });
 
         Assert.True(result.Ok);
         // A subsequent full-capacity request still fits — nothing was consumed.
-        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\full", 10) }).Ok);
+        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "full"), 10) }).Ok);
     }
 
     [Fact]
@@ -108,7 +114,7 @@ public sealed class SpaceReservationLedgerTests
         // An unresolved volume reports long.MaxValue; even an enormous request is granted.
         var ledger = new SpaceReservationLedger(FakeFreeSpaceProbe.Unconstrained());
 
-        ReservationResult result = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\huge", long.MaxValue / 2) });
+        ReservationResult result = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "huge"), long.MaxValue / 2) });
         Assert.True(result.Ok);
     }
 
@@ -126,7 +132,7 @@ public sealed class SpaceReservationLedgerTests
         var granted = new ConcurrentBag<SpaceReservation>();
         Parallel.For(0, 200, new ParallelOptions { MaxDegreeOfParallelism = 16 }, i =>
         {
-            ReservationResult r = ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\p" + i, unit) });
+            ReservationResult r = ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "p" + i), unit) });
             if (r.Ok)
                 granted.Add(r.Handle!);
         });
@@ -135,11 +141,11 @@ public sealed class SpaceReservationLedgerTests
         // threads each wanted a unit and none released mid-run.
         Assert.Equal((int)(capacity / unit), granted.Count);
         // With all 10 still held, a further request must be refused.
-        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\more", unit) }).Ok);
+        Assert.False(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "more"), unit) }).Ok);
 
         // After releasing every hold, the full capacity is reservable again in one shot.
         foreach (SpaceReservation handle in granted)
             handle.Dispose();
-        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(VolA + @"\final", capacity) }).Ok);
+        Assert.True(ledger.TryReserve(new[] { new SpaceRequest(Under(VolA, "final"), capacity) }).Ok);
     }
 }
