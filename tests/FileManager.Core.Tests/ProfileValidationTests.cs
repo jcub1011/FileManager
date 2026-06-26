@@ -98,4 +98,32 @@ public sealed class ProfileValidationTests
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Path.Contains("Cron"));
     }
+
+    [Fact]
+    public void InvalidExcludeRegex_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var filters = (JsonObject)doc["Filters"]!;
+        filters["ExcludeRegex"] = new JsonArray("*.secret"); // leading quantifier → malformed regex
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("ExcludeRegex"));
+    }
+
+    [Fact]
+    public void InvalidAgeDuration_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var filters = (JsonObject)doc["Filters"]!;
+        filters["ModifiedWithin"] = "3M"; // uppercase unit is not accepted (ambiguous months/minutes)
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("ModifiedWithin"));
+    }
 }
