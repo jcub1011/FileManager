@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FileManager.TestStub</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Test fixture, not shipped; the real engine surface stays in FileManager.Core. -->
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+</Project>

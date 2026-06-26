@@ -4,6 +4,7 @@ using FileManager.Core.Jobs;
 using FileManager.Core.Logging;
 using FileManager.Core.Profiles;
 using FileManager.Core.Routing;
+using FileManager.Core.Transformers;
 using Xunit;
 
 namespace FileManager.Core.Tests;
@@ -20,7 +21,9 @@ public sealed class JobEngineTests : IDisposable
     public JobEngineTests()
     {
         _engine = new JobEngine(
-            new SystemFileOperations(), _log, new JobEngineOptions { TrashDirectory = _temp.Path("trash") });
+            new SystemFileOperations(),
+            _log,
+            new JobEngineOptions { TrashDirectory = _temp.Path("trash"), PipelineTempRoot = _temp.Path("pipe") });
     }
 
     public void Dispose() => _temp.Dispose();
@@ -202,5 +205,56 @@ public sealed class JobEngineTests : IDisposable
         Assert.Equal("incoming", File.ReadAllText(file));
         Assert.Equal("existing", File.ReadAllText(Path.Combine(t, "a.txt")));
         Assert.Equal(TargetAction.Skipped, r.Targets[0].Action);
+    }
+
+    [Fact]
+    public void Transformers_RunChain_ThenDistributeTransformedFile()
+    {
+        // The §5.1 sample shape on the stub: NewFile (re-extension) → InPlace, then PreserveStructure
+        // distribution of the transformed file at the same relative location with the new name.
+        string s = _temp.MakeDir("S");
+        string t = _temp.MakeDir("T");
+        string file = _temp.WriteFile("S/sub/track.wav", "audio");
+        Profile p = TestProfiles.Build(new[] { s }, new[] { t }, TargetLayout.PreserveStructure) with
+        {
+            Transformers = new[]
+            {
+                TestTransformers.NewFile(1, StubExecutable.Path, "copy $step_input_path $step_output_path", ".mp3"),
+                TestTransformers.InPlace(2, StubExecutable.Path, "tag $step_input_path"),
+            },
+        };
+
+        JobResult r = _engine.ProcessFile(p, file, Ctx);
+
+        Assert.Equal(JobState.Closed, r.State);
+        string dest = Path.Combine(t, "sub", "track.mp3");
+        Assert.True(File.Exists(dest), r.FailureReason);
+        Assert.Equal("audio[tagged]", File.ReadAllText(dest));
+        Assert.Equal("audio", File.ReadAllText(file));               // original source untouched
+        Assert.Contains(_log.Entries, e => e.Code == "STEP_STDOUT"); // step output reaches the Job log
+    }
+
+    [Fact]
+    public void TransformerAbort_LeavesSourceInPlace_AndRemovesWorkspace()
+    {
+        string s = _temp.MakeDir("S");
+        string t = _temp.MakeDir("T");
+        string file = _temp.WriteFile("S/track.wav", "audio");
+        Profile p = TestProfiles.Build(new[] { s }, new[] { t }) with
+        {
+            Transformers = new[] { TestTransformers.InPlace(1, StubExecutable.Path, "exit 9") },
+        };
+
+        JobResult r = _engine.ProcessFile(p, file, Ctx);
+
+        Assert.Equal(JobState.Failed, r.State);
+        Assert.True(File.Exists(file));                              // source untouched
+        Assert.Equal("audio", File.ReadAllText(file));
+        Assert.False(File.Exists(Path.Combine(t, "track.wav")));     // nothing distributed
+
+        // The per-Job workspace was torn down: no Job subdirectories linger under .pipeline_tmp.
+        string pipelineDir = Path.Combine(_temp.Path("pipe"), TempWorkspace.PipelineDirName);
+        Assert.True(
+            !Directory.Exists(pipelineDir) || Directory.GetDirectories(pipelineDir).Length == 0);
     }
 }

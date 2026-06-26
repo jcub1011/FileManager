@@ -5,27 +5,33 @@ using FileManager.Core.IO;
 using FileManager.Core.Logging;
 using FileManager.Core.Profiles;
 using FileManager.Core.Routing;
+using FileManager.Core.Transformers;
 
 namespace FileManager.Core.Jobs;
 
 /// <summary>
-/// Runs the single-file Job lifecycle (§4) synchronously: ingest → screen → distribute → dispose.
-/// Transformers (M2), real verification/rollback (M3), journaling (M4), and concurrency/triggers (M5)
-/// are out of scope; <see cref="ProcessFile"/> is the programmatic entrypoint that later triggers call.
+/// Runs the single-file Job lifecycle (§4) synchronously: ingest → screen → transform → distribute →
+/// dispose. Real verification/rollback (M3), journaling (M4), and concurrency/triggers (M5) are out
+/// of scope; <see cref="ProcessFile"/> is the programmatic entrypoint that later triggers call.
 /// </summary>
 public sealed class JobEngine
 {
     private readonly IFileOperations _files;
     private readonly ILogSink _log;
     private readonly FilterEvaluator _evaluator;
+    private readonly TransformerRunner _transformerRunner;
     private readonly string _trashDirectory;
+    private readonly string _pipelineTempRoot;
 
-    public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null)
+    public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
     {
         _files = files;
         _log = log;
         _evaluator = new FilterEvaluator(files);
-        _trashDirectory = (options ?? new JobEngineOptions()).ResolveTrashDirectory();
+        _transformerRunner = new TransformerRunner(files, processRunner ?? new SystemProcessRunner());
+        JobEngineOptions effective = options ?? new JobEngineOptions();
+        _trashDirectory = effective.ResolveTrashDirectory();
+        _pipelineTempRoot = effective.ResolvePipelineTempRoot();
     }
 
     /// <summary>
@@ -59,6 +65,24 @@ public sealed class JobEngine
                 FailureReason = reason,
                 Logs = logs,
             };
+        }
+
+        void EmitStep(StepResult step)
+        {
+            string shellTag = step.Shell ? " [shell]" : string.Empty;
+            if (step.Succeeded)
+                Emit(LogSeverity.Info, "STEP", $"Step {step.Step} ({step.Name}){shellTag}: exit {step.ExitCode}");
+            else if (step.TimedOut)
+                Emit(LogSeverity.Failure, "STEP_TIMEOUT", $"Step {step.Step} ({step.Name}){shellTag} timed out");
+            else
+                Emit(LogSeverity.Failure, "STEP_FAILED", $"Step {step.Step} ({step.Name}){shellTag}: exit {step.ExitCode}");
+
+            // stdout/stderr always land in the JobResult log (the sink applies verbosity); failure
+            // diagnostics are not lost even at low verbosity because they ride the entries above.
+            if (step.StandardOutput.Length > 0)
+                Emit(LogSeverity.Info, "STEP_STDOUT", $"Step {step.Step} stdout: {step.StandardOutput}");
+            if (step.StandardError.Length > 0)
+                Emit(LogSeverity.Info, "STEP_STDERR", $"Step {step.Step} stderr: {step.StandardError}");
         }
 
         // Phase 1 — Ingestion: resolve the owning Source and snapshot metadata.
@@ -113,39 +137,90 @@ public sealed class JobEngine
             };
         }
 
-        // Phases 4–5 — Distribution to every Target (verification stubbed; atomic placement only).
-        TargetLayout layout = TargetResolver.ResolveLayout(profile);
+        // The file that Targets actually receive. Without a transformer chain this is the original
+        // source; with one it becomes the chain's final working file (possibly renamed/re-extensioned).
+        string distSource = source;
+        string distFileName = fileName;
+        string distRelativePath = relativePath;
+        FileMetadata distMeta = meta;
+
+        // The transformer workspace must outlive the chain so distribution can read the working file;
+        // it is torn down in the finally only after Phases 4–5 have copied it out.
         var outcomes = new List<TargetOutcome>();
+        TempWorkspace? workspace = null;
         try
         {
-            foreach (TargetSpec target in profile.Targets)
+            // Phase 3 — Transformer chain (only when the Profile defines one). Runs on an isolated
+            // working copy, so the original source is never mutated; a step failure/timeout aborts.
+            if (profile.Transformers is { Count: > 0 } transformers)
             {
-                string dest = TargetResolver.ResolveDestination(target, relativePath, fileName, layout);
-                ConflictOutcome plan = ConflictResolver.Resolve(
-                    _files, dest, meta, profile.Policies.ConflictResolution);
-
-                if (plan.Action == TargetAction.Skipped)
+                TransformerChainResult chain;
+                try
                 {
-                    Emit(LogSeverity.Skip, "SKIPPED", $"{fileName} → {target.Path}: conflict policy skip");
-                    outcomes.Add(new TargetOutcome(target.Path, null, TargetAction.Skipped));
-                    continue;
+                    workspace = TempWorkspace.Create(_files, _pipelineTempRoot, jobId);
+                    chain = _transformerRunner.Run(workspace, transformers, source, sourceRoot);
+                }
+                catch (Exception ex) when (IsIoError(ex))
+                {
+                    return Failed($"Transformer chain failed: {ex.Message}");
                 }
 
-                AtomicFileWriter.Write(_files, source, plan.FinalPath!, plan.Overwrite);
-                Emit(LogSeverity.Info, "PLACED", $"{fileName} → {plan.FinalPath} ({plan.Action})");
-                outcomes.Add(new TargetOutcome(target.Path, plan.FinalPath, plan.Action));
+                foreach (StepResult step in chain.Steps)
+                    EmitStep(step);
+
+                if (!chain.Succeeded)
+                    return Failed(chain.FailureReason ?? "Transformer chain aborted.");
+
+                distSource = chain.FinalWorkingFile!;
+                distFileName = Path.GetFileName(distSource);
+                distRelativePath = ReplaceFileName(relativePath, distFileName);
+                try
+                {
+                    distMeta = _files.GetMetadata(distSource);
+                }
+                catch (Exception ex) when (IsIoError(ex))
+                {
+                    return Failed($"Could not read transformed file metadata: {ex.Message}");
+                }
+            }
+
+            // Phases 4–5 — Distribution to every Target (verification stubbed; atomic placement only).
+            TargetLayout layout = TargetResolver.ResolveLayout(profile);
+            try
+            {
+                foreach (TargetSpec target in profile.Targets)
+                {
+                    string dest = TargetResolver.ResolveDestination(target, distRelativePath, distFileName, layout);
+                    ConflictOutcome plan = ConflictResolver.Resolve(
+                        _files, dest, distMeta, profile.Policies.ConflictResolution);
+
+                    if (plan.Action == TargetAction.Skipped)
+                    {
+                        Emit(LogSeverity.Skip, "SKIPPED", $"{distFileName} → {target.Path}: conflict policy skip");
+                        outcomes.Add(new TargetOutcome(target.Path, null, TargetAction.Skipped));
+                        continue;
+                    }
+
+                    AtomicFileWriter.Write(_files, distSource, plan.FinalPath!, plan.Overwrite);
+                    Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {plan.FinalPath} ({plan.Action})");
+                    outcomes.Add(new TargetOutcome(target.Path, plan.FinalPath, plan.Action));
+                }
+            }
+            catch (Exception ex) when (IsIoError(ex))
+            {
+                // Surface any Targets already written this run so a partial copy isn't silent.
+                // Real rollback of those placements lands in M3 (§3.3).
+                string placed = string.Join(", ", outcomes
+                    .Where(o => o.Action != TargetAction.Skipped)
+                    .Select(o => o.FinalPath ?? o.TargetRoot));
+                if (placed.Length > 0)
+                    Emit(LogSeverity.Failure, "PARTIAL", $"{distFileName}: distribution failed after placing: {placed}");
+                return Failed($"Target distribution failed: {ex.Message}");
             }
         }
-        catch (Exception ex) when (IsIoError(ex))
+        finally
         {
-            // Surface any Targets already written this run so a partial copy isn't silent.
-            // Real rollback of those placements lands in M3 (§3.3).
-            string placed = string.Join(", ", outcomes
-                .Where(o => o.Action != TargetAction.Skipped)
-                .Select(o => o.FinalPath ?? o.TargetRoot));
-            if (placed.Length > 0)
-                Emit(LogSeverity.Failure, "PARTIAL", $"{fileName}: distribution failed after placing: {placed}");
-            return Failed($"Target distribution failed: {ex.Message}");
+            workspace?.Dispose();
         }
 
         // Phase 6 — Source disposition. Only dispose of the source when at least one Target was
@@ -215,6 +290,17 @@ public sealed class JobEngine
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// A Source-relative path with its file name swapped for <paramref name="newFileName"/>, keeping
+    /// the original subfolder. Used so a transformer that renames/re-extensions the file still lands
+    /// in the same relative location under each Target's <see cref="TargetLayout.PreserveStructure"/>.
+    /// </summary>
+    private static string ReplaceFileName(string relativePath, string newFileName)
+    {
+        string? dir = Path.GetDirectoryName(relativePath);
+        return string.IsNullOrEmpty(dir) ? newFileName : Path.Combine(dir, newFileName);
     }
 
     /// <summary>Subfolder depth from a Source-relative path; 0 = directly in the Source root.</summary>

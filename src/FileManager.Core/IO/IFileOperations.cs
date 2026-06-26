@@ -47,6 +47,13 @@ public interface IFileOperations
     public void Delete(string path);
 
     /// <summary>
+    /// Deletes a directory. No-op if it is already absent. With <paramref name="recursive"/> the whole
+    /// subtree is removed; otherwise the directory must be empty. Used to tear down the per-Job
+    /// transformer workspace.
+    /// </summary>
+    public void DeleteDirectory(string path, bool recursive);
+
+    /// <summary>
     /// Enumerates file paths under <paramref name="directory"/>. Returns empty when the directory
     /// is missing. <paramref name="recursive"/> descends into subdirectories.
     /// </summary>

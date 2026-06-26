@@ -72,6 +72,20 @@ public sealed class ProfileValidationTests
     }
 
     [Fact]
+    public void TransformerStep_WithNonPositiveTimeout_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var step1 = (JsonObject)((JsonArray)doc["Transformers"]!)[0]!;
+        step1["TimeoutSeconds"] = 0;
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("TimeoutSeconds"));
+    }
+
+    [Fact]
     public void WrongSchemaVersion_IsInvalid()
     {
         JsonObject doc = TestSamples.ParseProfileSample();

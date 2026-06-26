@@ -15,6 +15,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FileManager.Core\FileManager.Core.csproj" />
+    <!--
+      The stub is a fixture binary. The reference builds it and copies its native apphost
+      (FileManager.TestStub[.exe]) into the test output, where StubExecutable resolves it by name.
+    -->
+    <ProjectReference Include="..\FileManager.TestStub\FileManager.TestStub.csproj" />
   </ItemGroup>
 
   <ItemGroup>
