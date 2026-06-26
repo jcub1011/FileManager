@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using FileManager.Core.Filtering;
+
 namespace FileManager.Core.Profiles;
 
 /// <summary>
@@ -35,6 +38,7 @@ public static class ProfileValidator
         ValidatePolicies(profile, errors);
         ValidateTransformers(profile, errors);
         ValidateSchedule(profile, errors);
+        ValidateFilters(profile, errors);
 
         return errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors);
     }
@@ -116,5 +120,57 @@ public static class ProfileValidator
                 $"{nameof(Profile.Triggers)}.{nameof(TriggerSet.Schedule)}.{nameof(ScheduleTrigger.Cron)}",
                 "Cron is required when the Schedule trigger is enabled."));
         }
+    }
+
+    /// <summary>
+    /// Validates regex patterns and age-duration strings in the global and per-Source
+    /// <see cref="FilterSet"/>s. A malformed regex or duration would otherwise be swallowed at
+    /// evaluation time (an excluded file leaking through, or an age filter silently disabled), so
+    /// per the "validation, not exceptions" rule we surface it here at load time instead.
+    /// </summary>
+    private static void ValidateFilters(Profile profile, List<ValidationError> errors)
+    {
+        ValidateFilterSet(profile.Filters, nameof(Profile.Filters), errors);
+
+        for (int i = 0; i < profile.Sources.Count; i++)
+        {
+            FilterSet? perSource = profile.Sources[i].Filters;
+            if (perSource is not null)
+                ValidateFilterSet(perSource, $"Sources[{i}].Filters", errors);
+        }
+    }
+
+    private static void ValidateFilterSet(FilterSet filters, string prefix, List<ValidationError> errors)
+    {
+        ValidateRegexList(filters.IncludeRegex, $"{prefix}.{nameof(FilterSet.IncludeRegex)}", errors);
+        ValidateRegexList(filters.ExcludeRegex, $"{prefix}.{nameof(FilterSet.ExcludeRegex)}", errors);
+
+        ValidateDuration(filters.ModifiedWithin, $"{prefix}.{nameof(FilterSet.ModifiedWithin)}", errors);
+        ValidateDuration(filters.ModifiedOlderThan, $"{prefix}.{nameof(FilterSet.ModifiedOlderThan)}", errors);
+        ValidateDuration(filters.CreatedWithin, $"{prefix}.{nameof(FilterSet.CreatedWithin)}", errors);
+    }
+
+    private static void ValidateRegexList(IReadOnlyList<string>? patterns, string prefix, List<ValidationError> errors)
+    {
+        if (patterns is null)
+            return;
+
+        for (int i = 0; i < patterns.Count; i++)
+        {
+            try
+            {
+                _ = Regex.Match(string.Empty, patterns[i]);
+            }
+            catch (RegexParseException ex)
+            {
+                errors.Add(new ValidationError($"{prefix}[{i}]", $"Invalid regex pattern: {ex.Message}"));
+            }
+        }
+    }
+
+    private static void ValidateDuration(string? value, string path, List<ValidationError> errors)
+    {
+        if (value is not null && !DurationParser.TryParse(value, out _))
+            errors.Add(new ValidationError(path, $"Invalid duration '{value}'; expected e.g. \"7d\", \"24h\", \"30m\", \"45s\"."));
     }
 }

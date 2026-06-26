@@ -183,6 +183,31 @@ public sealed class FilterEvaluatorTests
     }
 
     [Fact]
+    public void ContentHashDedupe_IgnoresAtomicTempFiles()
+    {
+        using var temp = new TempDir("dedupe-temp");
+        string src = temp.WriteFile("src/track.wav", "identical-bytes");
+        string targetDir = temp.MakeDir("target");
+        // An orphaned atomic-write temp with identical bytes must NOT count as a duplicate.
+        File.WriteAllText(Path.Combine(targetDir, "." + Guid.NewGuid().ToString("N") + AtomicFileWriter.TempSuffix), "identical-bytes");
+
+        var filters = new FilterSet { ContentHashDedupe = true };
+        var candidate = new FilterCandidate
+        {
+            FileName = "track.wav",
+            RelativePath = "track.wav",
+            Depth = 0,
+            FullPath = src,
+            Metadata = Meta(),
+        };
+
+        FilterDecision d = _eval.Evaluate(
+            filters, candidate, new[] { new TargetSpec { Path = targetDir } }, Now);
+
+        Assert.True(d.Included);
+    }
+
+    [Fact]
     public void ResolveEffective_PerSourceOverridesGlobal()
     {
         var global = new FilterSet { Include = new[] { "*.wav" } };

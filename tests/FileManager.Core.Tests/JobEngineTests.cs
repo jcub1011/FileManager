@@ -177,4 +177,30 @@ public sealed class JobEngineTests : IDisposable
         Assert.Equal(JobState.Failed, r.State);
         Assert.NotNull(r.FailureReason);
     }
+
+    [Fact]
+    public void AllTargetsSkipped_DoesNotDisposeSource()
+    {
+        // Regression: with a Skip conflict policy and PermanentDelete disposition, a pre-existing
+        // Target file means nothing is written this run — the source must NOT be deleted (data loss).
+        string s = _temp.MakeDir("S");
+        string t = _temp.MakeDir("T");
+        File.WriteAllText(Path.Combine(t, "a.txt"), "existing");
+        string file = _temp.WriteFile("S/a.txt", "incoming");
+        PolicySet policies = TestProfiles.DefaultPolicies with
+        {
+            ConflictResolution = ConflictResolution.Skip,
+            OnSuccess = OnSuccess.PermanentDelete,
+        };
+        Profile p = TestProfiles.Build(new[] { s }, new[] { t }, policies: policies);
+
+        JobResult r = _engine.ProcessFile(p, file, Ctx);
+
+        Assert.Equal(JobState.Closed, r.State);
+        Assert.Null(r.Disposition);
+        Assert.True(File.Exists(file));                                 // source preserved
+        Assert.Equal("incoming", File.ReadAllText(file));
+        Assert.Equal("existing", File.ReadAllText(Path.Combine(t, "a.txt")));
+        Assert.Equal(TargetAction.Skipped, r.Targets[0].Action);
+    }
 }

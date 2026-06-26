@@ -20,14 +20,34 @@ public sealed class SystemFileOperations : IFileOperations
     {
         var info = new FileInfo(path);
         FileAttributes attrs = info.Attributes;
+        bool isSymlink = (attrs & FileAttributes.ReparsePoint) != 0;
+
+        // For a symlink, size/timestamps from the link itself describe the reparse point, not the
+        // bytes a copy/hash would actually read. Resolve to the final target and stat that so the
+        // snapshot matches the content the engine processes. Fall back to the link's own stat if the
+        // target can't be resolved (e.g. a dangling link).
+        FileInfo statInfo = info;
+        if (isSymlink)
+        {
+            try
+            {
+                if (info.ResolveLinkTarget(returnFinalTarget: true) is FileInfo resolved && resolved.Exists)
+                    statInfo = resolved;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Dangling or unreadable link target; keep the link's own stat.
+            }
+        }
+
         return new FileMetadata
         {
-            Length = info.Length,
-            LastWriteTimeUtc = info.LastWriteTimeUtc,
-            CreationTimeUtc = info.CreationTimeUtc,
+            Length = statInfo.Length,
+            LastWriteTimeUtc = statInfo.LastWriteTimeUtc,
+            CreationTimeUtc = statInfo.CreationTimeUtc,
             IsHidden = (attrs & FileAttributes.Hidden) != 0,
             IsSystem = (attrs & FileAttributes.System) != 0,
-            IsSymlink = (attrs & FileAttributes.ReparsePoint) != 0,
+            IsSymlink = isSymlink,
         };
     }
 

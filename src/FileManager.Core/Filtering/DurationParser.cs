@@ -9,7 +9,8 @@ public static class DurationParser
     /// <summary>
     /// Tries to parse a duration like <c>"7d"</c>. Accepts a non-negative integer magnitude followed
     /// by a unit suffix: <c>d</c> (days), <c>h</c> (hours), <c>m</c> (minutes), <c>s</c> (seconds).
-    /// Returns false for null/empty/malformed input.
+    /// Units are lowercase only, per spec §5.1 — uppercase is rejected so an ambiguous <c>"3M"</c>
+    /// (months?) is never silently treated as 3 minutes. Returns false for null/empty/malformed input.
     /// </summary>
     public static bool TryParse(string? text, out TimeSpan duration)
     {
@@ -27,19 +28,15 @@ public static class DurationParser
         switch (unit)
         {
             case 'd':
-            case 'D':
                 duration = TimeSpan.FromDays(magnitude);
                 return true;
             case 'h':
-            case 'H':
                 duration = TimeSpan.FromHours(magnitude);
                 return true;
             case 'm':
-            case 'M':
                 duration = TimeSpan.FromMinutes(magnitude);
                 return true;
             case 's':
-            case 'S':
                 duration = TimeSpan.FromSeconds(magnitude);
                 return true;
             default:

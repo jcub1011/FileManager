@@ -25,6 +25,10 @@ public sealed class DurationParserTests
     [InlineData("d")]      // no magnitude
     [InlineData("-3d")]    // negative
     [InlineData("3w")]     // unsupported unit
+    [InlineData("3M")]     // uppercase: ambiguous (months?), not minutes
+    [InlineData("7D")]     // uppercase units rejected (lowercase only, per spec)
+    [InlineData("24H")]
+    [InlineData("45S")]
     [InlineData("abc")]
     public void TryParse_Invalid_ReturnsFalse(string? text)
     {

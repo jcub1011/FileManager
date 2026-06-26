@@ -138,10 +138,35 @@ public sealed class JobEngine
         }
         catch (Exception ex) when (IsIoError(ex))
         {
+            // Surface any Targets already written this run so a partial copy isn't silent.
+            // Real rollback of those placements lands in M3 (§3.3).
+            string placed = string.Join(", ", outcomes
+                .Where(o => o.Action != TargetAction.Skipped)
+                .Select(o => o.FinalPath ?? o.TargetRoot));
+            if (placed.Length > 0)
+                Emit(LogSeverity.Failure, "PARTIAL", $"{fileName}: distribution failed after placing: {placed}");
             return Failed($"Target distribution failed: {ex.Message}");
         }
 
-        // Phase 6 — Source disposition.
+        // Phase 6 — Source disposition. Only dispose of the source when at least one Target was
+        // actually written; if every Target was skipped (conflict policy), nothing was copied this
+        // run, so the source must be left in place — disposing it (e.g. PermanentDelete) would be
+        // data loss.
+        bool anyWritten = outcomes.Any(o => o.Action != TargetAction.Skipped);
+        if (!anyWritten)
+        {
+            Emit(LogSeverity.Skip, "DISPOSED", $"{fileName}: all targets skipped; source left in place");
+            return new JobResult
+            {
+                JobId = jobId,
+                State = JobState.Closed,
+                SourcePath = source,
+                Targets = outcomes,
+                Disposition = null,
+                Logs = logs,
+            };
+        }
+
         DispositionOutcome disposition;
         try
         {
@@ -205,6 +230,10 @@ public sealed class JobEngine
         return depth;
     }
 
+    // Only genuine I/O faults resolve to a Failed Job. ArgumentException/InvalidOperationException
+    // signal programmer/config error (e.g. a malformed path, or MoveToArchive without ArchiveFolder —
+    // the latter is caught at profile validation) and must surface rather than be masked as a
+    // per-file I/O failure.
     private static bool IsIoError(Exception ex) =>
-        ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException;
+        ex is IOException or UnauthorizedAccessException;
 }

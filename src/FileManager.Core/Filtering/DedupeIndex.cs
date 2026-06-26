@@ -30,6 +30,11 @@ public static class DedupeIndex
         {
             foreach (string candidate in files.EnumerateFiles(target.Path, recursive: true))
             {
+                // Skip in-flight/orphaned atomic-write temps — they are byte-copies of a source and
+                // would otherwise produce a spurious duplicate match.
+                if (candidate.EndsWith(AtomicFileWriter.TempSuffix, StringComparison.Ordinal))
+                    continue;
+
                 try
                 {
                     if (HashUtil.ComputeSha256(files, candidate) == sourceHash)

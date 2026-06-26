@@ -13,6 +13,14 @@ public static class AtomicFileWriter
     private const int BufferSize = 1 << 20; // 1 MiB
 
     /// <summary>
+    /// Suffix of the in-flight temp artifacts this writer creates inside a destination directory.
+    /// Consumers that enumerate Target contents (e.g.
+    /// <see cref="FileManager.Core.Filtering.DedupeIndex"/>) must skip these so a half-written or
+    /// orphaned temp is never mistaken for a real Target file.
+    /// </summary>
+    public const string TempSuffix = ".fmtmp";
+
+    /// <summary>
     /// Copies <paramref name="sourcePath"/> to a temp name in the destination directory, then
     /// atomically renames it to <paramref name="finalDestPath"/>. When <paramref name="overwrite"/>
     /// is true an existing destination is replaced; otherwise the caller must have ensured the
@@ -25,7 +33,7 @@ public static class AtomicFileWriter
             ?? throw new ArgumentException("Destination has no directory.", nameof(finalDestPath));
         files.CreateDirectory(destDir);
 
-        string tempPath = Path.Combine(destDir, "." + Guid.NewGuid().ToString("N") + ".fmtmp");
+        string tempPath = Path.Combine(destDir, "." + Guid.NewGuid().ToString("N") + TempSuffix);
         try
         {
             using (Stream src = files.OpenRead(sourcePath))
