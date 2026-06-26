@@ -1,7 +1,4 @@
-using System.Collections.Generic;
-using FileManager.Models;
-
-namespace FileManager.Services;
+namespace FileManager.Core.FileSystem;
 
 /// <summary>
 /// Abstraction over the file system. Implementations must be platform-neutral so the

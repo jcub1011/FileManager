@@ -65,17 +65,17 @@ placement, driven by a programmatic "process this path" entrypoint (real trigger
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Jobs/
+src/FileManager.Core/Jobs/
   Job.cs, JobState.cs, JobResult.cs, JobEngine.cs, IngestionContext.cs
-src/FilePipeline.Core/Filtering/
+src/FileManager.Core/Filtering/
   FilterEvaluator.cs, GlobMatcher.cs, AttributeChecks.cs, DedupeIndex.cs
-src/FilePipeline.Core/Routing/
+src/FileManager.Core/Routing/
   TargetResolver.cs, ConflictResolver.cs
-src/FilePipeline.Core/IO/
+src/FileManager.Core/IO/
   AtomicFileWriter.cs (copy-to-temp + rename, streamed), PathNormalizer.cs
-src/FilePipeline.Core/Tokens/
+src/FileManager.Core/Tokens/
   TokenExpander.cs (filename tokens)
-src/FilePipeline.Core/Disposition/
+src/FileManager.Core/Disposition/
   SourceDisposer.cs (basic OnSuccess)
 ```
 

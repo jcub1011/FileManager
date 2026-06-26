@@ -34,7 +34,7 @@ release packaging.
 - Non-functional validation: throughput benchmark (pool saturates I/O, IPC/GUI stay responsive);
   idle-footprint measurement; assert streaming copy/verify on a multi-GB file (no large memory
   growth).
-- Acceptance suite (`tests/FilePipeline.Integration.Tests`) covering every §12 bullet.
+- Acceptance suite (`tests/FileManager.Integration.Tests`) covering every §12 bullet.
 - Per-OS packaging/release: Windows (AOT publish + sparse MSIX from M8, signed) and Linux (AOT publish
   + systemd user unit from M6); release CI job.
 - Finalize Appendix B open items and update the spec/docs cross-references.
@@ -67,14 +67,14 @@ release packaging.
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Security/
+src/FileManager.Core/Security/
   ExecutableValidator.cs, Allowlist.cs
-src/FilePipeline.Core/Network/
+src/FileManager.Core/Network/
   NetworkTargetGuard.cs (reachability + optional retry/backoff)
-tests/FilePipeline.Integration.Tests/
+tests/FileManager.Integration.Tests/
   TopologyMatrixTests.cs, PhaseFailureRollbackTests.cs, CrashRecoveryTests.cs,
   LiteralInjectionTests.cs, DryRunZeroWriteTests.cs, NoNetworkListenerTests.cs
-benchmarks/FilePipeline.Benchmarks/
+benchmarks/FileManager.Benchmarks/
   ThroughputBenchmark.cs, LargeFileStreamingBenchmark.cs
 build/release/
   publish-windows.ps1, publish-linux.sh, release.yml (CI)

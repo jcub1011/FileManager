@@ -61,12 +61,12 @@ land in M3; M2 wires the abort hook and cleans the temp workspace).
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Transformers/
+src/FileManager.Core/Transformers/
   TransformerRunner.cs, TempWorkspace.cs, ProcessInvoker.cs,
   ArgumentParser.cs (Literal), ShellCommandBuilder.cs (Shell), StepResult.cs
-src/FilePipeline.Core/Tokens/
+src/FileManager.Core/Tokens/
   TokenExpander.cs (extended with step tokens)
-src/FilePipeline.Core/Jobs/
+src/FileManager.Core/Jobs/
   JobEngine.cs (Phase-3 integration + abort hook)
 ```
 

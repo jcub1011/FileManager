@@ -21,11 +21,11 @@ side-effect-free simulation pass.
 ## Scope
 
 **In scope**
-- Repurpose `FileManager` Avalonia app into `FilePipeline.Gui`: keep App/DI/MVVM bootstrap and
+- Repurpose `FileManager` Avalonia app into `FileManager.Gui`: keep App/DI/MVVM bootstrap and
   `IFileSystemService` (now a path picker); drop the browser `MainWindow` views.
 - Profile editor: full §5.1 schema with validation feedback; the §6.1 safety warnings (blocking vs
   non-blocking) driven by `SafetyAnalyzer` (M3); `Mirror` clearly flagged as destructive (§3.1.1).
-- IPC client (`FilePipeline.Contracts`) to the Service: live engine state, activity/error view with
+- IPC client (`FileManager.Contracts`) to the Service: live engine state, activity/error view with
   per-Job drill-down into logs (§7), Profile list/reload.
 - Dry-run **engine**: a side-effect-free simulation reusing M1 filter screening (with recorded
   deciding filter), M2 token expansion (command preview), M3 Mirror/overwrite/disposition planning —
@@ -52,7 +52,7 @@ side-effect-free simulation pass.
       `Mirror` flag.
 - [ ] Activity/error view: live list of recent Jobs (success/skip/failure) + drill-down to per-Job
       log; subscribe to `JobEvent` stream.
-- [ ] `DryRunEngine` in `FilePipeline.Core` (`Simulation/`): produce a `DryRunReport` reusing the real
+- [ ] `DryRunEngine` in `FileManager.Core` (`Simulation/`): produce a `DryRunReport` reusing the real
       filter/token/planning code paths in a no-write mode; never invokes Transformers or touches the
       filesystem destructively.
 - [ ] Wire `DryRunRequest`/`DryRunReport` in the Service (M6 messages) to `DryRunEngine`.
@@ -65,13 +65,13 @@ side-effect-free simulation pass.
 ## Proposed structure
 
 ```
-src/FilePipeline.Gui/                        (repurposed from src/FileManager)
+src/FileManager.Gui/                        (repurposed from src/FileManager)
   App.axaml(.cs), ViewModels/ViewModelBase.cs
   Ipc/IpcClient.cs
   Views/ProfileEditorView.axaml(.cs), ActivityView.axaml(.cs), DryRunView.axaml(.cs), MainWindow...
   ViewModels/ProfileEditorViewModel.cs, ActivityViewModel.cs, DryRunViewModel.cs, MainWindowViewModel.cs
   Services/PathPickerService.cs (wraps IFileSystemService), NotificationService.cs
-src/FilePipeline.Core/Simulation/
+src/FileManager.Core/Simulation/
   DryRunEngine.cs, DryRunReport.cs
 ```
 

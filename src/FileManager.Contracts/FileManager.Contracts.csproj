@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FileManager.Contracts</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Shared, dependency-free contracts (IPC names today; message DTOs in M6).
+    Referenced by Core, the Service host, the GUI, and the Shell integration.
+  -->
+
+</Project>

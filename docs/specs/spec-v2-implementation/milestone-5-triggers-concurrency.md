@@ -65,13 +65,13 @@ configured Sources at scale (the manual shell trigger arrives with shell integra
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Execution/
+src/FileManager.Core/Execution/
   WorkerPool.cs, JobQueue.cs, PathLockManager.cs
-src/FilePipeline.Core/Triggers/Watcher/
+src/FileManager.Core/Triggers/Watcher/
   SourceWatcher.cs, ReadinessProbe.cs, WatcherScaleManager.cs, RescanFallback.cs
-src/FilePipeline.Core/Triggers/Schedule/
+src/FileManager.Core/Triggers/Schedule/
   Scheduler.cs, CronExpression.cs, MissedRunEvaluator.cs
-src/FilePipeline.Core/State/
+src/FileManager.Core/State/
   LastRunStore.cs (schedule bookkeeping)
 ```
 

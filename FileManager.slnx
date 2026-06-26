@@ -2,8 +2,20 @@
   <Folder Name="/docs/" />
   <Folder Name="/docs/specs/">
     <File Path="docs/specs/spec-draft-v1.md" />
+    <File Path="docs/specs/spec-draft-v2.md" />
+  </Folder>
+  <Folder Name="/solution/">
+    <File Path="Directory.Build.props" />
+    <File Path=".editorconfig" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+    <File Path="CLAUDE.md" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/FileManager/FileManager.csproj" />
+    <Project Path="src/FileManager.Core/FileManager.Core.csproj" />
+    <Project Path="src/FileManager.Contracts/FileManager.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FileManager.Core.Tests/FileManager.Core.Tests.csproj" />
   </Folder>
 </Solution>

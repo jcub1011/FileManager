@@ -17,19 +17,19 @@ milestones before it.
 
 ## Proposed solution architecture
 
-Product namespace **`FilePipeline`** (matches the spec's IPC names, e.g. `filepipeline-<user>`). The
+Product namespace **`FileManager`** (matches the spec's IPC names, e.g. `filemanager-<user>`). The
 existing `src/FileManager` project is retired in M0; its reusable pieces migrate into the new
 projects.
 
 | Project | Role | First built in |
 | --- | --- | --- |
-| `src/FilePipeline.Core` | Engine library: Profile models, Job lifecycle, filters, transformers, verification, rollback, journal, watcher, scheduler, worker pool, trash/metadata. No UI deps; AOT-compatible. | M0 |
-| `src/FilePipeline.Contracts` | IPC message contracts shared by Service/GUI/Shell (length-prefixed JSON DTOs). | M0 |
-| `src/FilePipeline.Service` | Headless Core Service host: wires engine + IPC server + optional tray; autostart units. | M6 |
-| `src/FilePipeline.Gui` | Avalonia configuration GUI (repurposed from `FileManager`): Profile editor, activity view, dry-run. | M7 |
-| `src/FilePipeline.Shell` | Shell integration: Windows `IExplorerCommand` handler + registry fallback launcher; Linux file-manager actions; CLI fallback. | M8 |
-| `tests/FilePipeline.Core.Tests` | Unit tests for the engine. | M0 |
-| `tests/FilePipeline.Integration.Tests` | End-to-end acceptance tests (spec §12). | M9 |
+| `src/FileManager.Core` | Engine library: Profile models, Job lifecycle, filters, transformers, verification, rollback, journal, watcher, scheduler, worker pool, trash/metadata. No UI deps; AOT-compatible. | M0 |
+| `src/FileManager.Contracts` | IPC message contracts shared by Service/GUI/Shell (length-prefixed JSON DTOs). | M0 |
+| `src/FileManager.Service` | Headless Core Service host: wires engine + IPC server + optional tray; autostart units. | M6 |
+| `src/FileManager.Gui` | Avalonia configuration GUI (repurposed from `FileManager`): Profile editor, activity view, dry-run. | M7 |
+| `src/FileManager.Shell` | Shell integration: Windows `IExplorerCommand` handler + registry fallback launcher; Linux file-manager actions; CLI fallback. | M8 |
+| `tests/FileManager.Core.Tests` | Unit tests for the engine. | M0 |
+| `tests/FileManager.Integration.Tests` | End-to-end acceptance tests (spec §12). | M9 |
 
 ## Milestones
 
@@ -56,7 +56,7 @@ M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► 
 M0…M8 ──────────────────────────────────────────► M9
 ```
 
-`M0` also feeds `M6` directly (the `FilePipeline.Contracts` project). `M9` depends on everything.
+`M0` also feeds `M6` directly (the `FileManager.Contracts` project). `M9` depends on everything.
 
 ## Spec-section coverage matrix
 
