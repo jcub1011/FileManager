@@ -90,6 +90,8 @@ public static class ServiceConfigStore
                 ? config.LogRotationSizeBytes : defaults.LogRotationSizeBytes,
             AuditRotationSizeBytes = obj.ContainsKey(nameof(ServiceConfig.AuditRotationSizeBytes))
                 ? config.AuditRotationSizeBytes : defaults.AuditRotationSizeBytes,
+            JournalRotationSizeBytes = obj.ContainsKey(nameof(ServiceConfig.JournalRotationSizeBytes))
+                ? config.JournalRotationSizeBytes : defaults.JournalRotationSizeBytes,
             MinFreeSpaceMarginBytes = obj.ContainsKey(nameof(ServiceConfig.MinFreeSpaceMarginBytes))
                 ? config.MinFreeSpaceMarginBytes : defaults.MinFreeSpaceMarginBytes,
         };
@@ -108,6 +110,9 @@ public static class ServiceConfigStore
 
         if (config.AuditRotationSizeBytes <= 0)
             errors.Add(new ValidationError(nameof(ServiceConfig.AuditRotationSizeBytes), "AuditRotationSizeBytes must be positive."));
+
+        if (config.JournalRotationSizeBytes <= 0)
+            errors.Add(new ValidationError(nameof(ServiceConfig.JournalRotationSizeBytes), "JournalRotationSizeBytes must be positive."));
 
         if (config.MinFreeSpaceMarginBytes < 0)
             errors.Add(new ValidationError(nameof(ServiceConfig.MinFreeSpaceMarginBytes), "MinFreeSpaceMarginBytes must not be negative."));

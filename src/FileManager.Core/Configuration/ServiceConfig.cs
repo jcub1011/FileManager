@@ -7,10 +7,17 @@ namespace FileManager.Core.Configuration;
 /// </summary>
 /// <remarks>
 /// Consumed by later milestones: <see cref="MaxWorkers"/> in M5, host wiring in M6,
-/// <see cref="Allowlist"/> in M9, and the log/journal/audit locations in M4/M7.
+/// <see cref="Allowlist"/> in M9. The log/journal/audit locations are consumed by M4.
 /// <para>
-/// TODO (Appendix B): the exact log/journal/audit locations and rotation sizes are open items.
-/// The defaults below are placeholders finalized alongside their consumers (M4 writer, M7 GUI).
+/// Appendix B (M4-finalized) durable-file locations — all relative to
+/// <see cref="ConfigPaths.GetConfigDirectory"/> when the corresponding field is null:
+/// <list type="bullet">
+/// <item><see cref="JournalDirectory"/> → <c>journal/jobs.journal</c> (rotated/compacted in place).</item>
+/// <item><see cref="AuditLogPath"/> → <c>deletions.audit</c> (rotated to a timestamped backup).</item>
+/// <item><see cref="LogDirectory"/> → <c>logs/filemanager.log</c> (rotated to a timestamped backup).</item>
+/// </list>
+/// Journal/audit records are framed (length + CRC-32) and fsync'd per record; the application log is a
+/// best-effort rotating text log.
 /// </para>
 /// </remarks>
 public sealed record ServiceConfig
@@ -20,6 +27,9 @@ public sealed record ServiceConfig
 
     /// <summary>Default rotation size for the deletion audit trail: 50 MiB.</summary>
     public const long DefaultAuditRotationSizeBytes = 50L * 1024 * 1024;
+
+    /// <summary>Default compaction threshold for the durable Job journal: 8 MiB.</summary>
+    public const long DefaultJournalRotationSizeBytes = 8L * 1024 * 1024;
 
     /// <summary>
     /// Size of the bounded worker pool (§5.4). Defaults to the machine's logical CPU count.
@@ -33,20 +43,22 @@ public sealed record ServiceConfig
     public IReadOnlyList<string>? Allowlist { get; init; }
 
     /// <summary>
-    /// Directory for the rotating persistent log. <c>null</c> uses a default under the config
-    /// directory (resolved by the M4 log writer). TODO Appendix B.
+    /// Directory for the rotating persistent application log. <c>null</c> resolves to
+    /// <c>&lt;config&gt;/logs/</c> (file <c>filemanager.log</c>), via
+    /// <see cref="FileManager.Core.Logging.RotatingLogWriter.FromConfig"/>.
     /// </summary>
     public string? LogDirectory { get; init; }
 
     /// <summary>
-    /// Directory for the durable Job journal. <c>null</c> uses a default under the config
-    /// directory (resolved by the M4 journal). TODO Appendix B.
+    /// Directory for the durable Job journal. <c>null</c> resolves to <c>&lt;config&gt;/journal/</c>
+    /// (file <c>jobs.journal</c>), via <see cref="FileManager.Core.Journal.FileJournal.FromConfig"/>.
     /// </summary>
     public string? JournalDirectory { get; init; }
 
     /// <summary>
-    /// File path for the append-only deletion audit trail. <c>null</c> uses a default under the
-    /// config directory (resolved by the M4 audit writer). TODO Appendix B.
+    /// File path for the append-only deletion audit trail. <c>null</c> resolves to
+    /// <c>&lt;config&gt;/deletions.audit</c>, via
+    /// <see cref="FileManager.Core.Audit.AuditLog.FromConfig"/>.
     /// </summary>
     public string? AuditLogPath { get; init; }
 
@@ -55,6 +67,9 @@ public sealed record ServiceConfig
 
     /// <summary>Rotate the audit trail when it reaches this many bytes.</summary>
     public long AuditRotationSizeBytes { get; init; } = DefaultAuditRotationSizeBytes;
+
+    /// <summary>Compact the Job journal (dropping closed-Job records) when it reaches this many bytes.</summary>
+    public long JournalRotationSizeBytes { get; init; } = DefaultJournalRotationSizeBytes;
 
     /// <summary>
     /// Headroom (in bytes) the proactive disk-space checks keep free on every volume: a Target write

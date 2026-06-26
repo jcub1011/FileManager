@@ -37,6 +37,13 @@ public sealed class RollbackContext
         _placedFinals.Add(finalPath);
     }
 
+    /// <summary>
+    /// Records a final this Job placed, without an originating temp to clear. Used when reconstructing
+    /// a context from the durable journal (M4 recovery), where the temp→final promotion already
+    /// happened on the crashed run and only the placed final needs undoing.
+    /// </summary>
+    public void RecordPlacedFinal(string finalPath) => _placedFinals.Add(finalPath);
+
     /// <summary>Records that <paramref name="originalPath"/>'s prior version was staged at <paramref name="stagedPath"/>.</summary>
     public void RecordStaged(string stagedPath, string originalPath) =>
         _stagedOriginals.Add(new StagedOriginal(stagedPath, originalPath));
