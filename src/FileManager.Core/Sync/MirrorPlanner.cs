@@ -1,4 +1,5 @@
 using System.IO;
+using FileManager.Core.Audit;
 using FileManager.Core.IO;
 using FileManager.Core.Profiles;
 using FileManager.Core.Routing;
@@ -34,8 +35,30 @@ public sealed record MirrorDeletion(MirrorSurplus Surplus, TrashResult Result);
 /// <see cref="SyncMode.Mirror"/>. It is deliberately not part of the per-file
 /// <c>JobEngine.ProcessFile</c> path, which reasons about a single file.
 /// </remarks>
-public sealed class MirrorPlanner(IFileOperations files, ITrashService trash)
+public sealed class MirrorPlanner
 {
+    private readonly IFileOperations files;
+    private readonly ITrashService trash;
+    private readonly IAuditLog _audit;
+    private readonly Func<DateTimeOffset> _clock;
+
+    /// <summary>
+    /// Creates a planner. <paramref name="audit"/> records an <see cref="AuditEntry"/> for every
+    /// surplus deletion (§7); the default <see cref="NullAuditLog"/> keeps pre-M4 call sites working.
+    /// <paramref name="clock"/> stamps audit timestamps (defaults to wall-clock UTC).
+    /// </summary>
+    public MirrorPlanner(
+        IFileOperations files,
+        ITrashService trash,
+        IAuditLog? audit = null,
+        Func<DateTimeOffset>? clock = null)
+    {
+        this.files = files;
+        this.trash = trash;
+        _audit = audit ?? NullAuditLog.Instance;
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+    }
+
     /// <summary>
     /// Identifies surplus Target files: those whose layout-relative key is not produced by any Source
     /// file under the Profile's effective layout.
@@ -64,18 +87,39 @@ public sealed class MirrorPlanner(IFileOperations files, ITrashService trash)
         return new MirrorPlan(surplus);
     }
 
-    /// <summary>Routes every file in <paramref name="plan"/> to the native trash, collecting results.</summary>
-    public MirrorExecution Execute(MirrorPlan plan)
+    /// <summary>
+    /// Routes every file in <paramref name="plan"/> to the native trash, collecting results and
+    /// recording a <see cref="AuditEntry"/> for each deletion that <b>actually occurred</b> (§7) —
+    /// a failed <see cref="ITrashService.MoveToTrash"/> leaves the file in place, so it is not audited
+    /// as a deletion. <paramref name="auditId"/> identifies the reconciliation in the audit trail (the
+    /// Profile ID, since a Mirror sweep is not a single-file Job).
+    /// </summary>
+    public MirrorExecution Execute(MirrorPlan plan, string auditId)
     {
         var deletions = new List<MirrorDeletion>(plan.Surplus.Count);
         foreach (MirrorSurplus item in plan.Surplus)
-            deletions.Add(new MirrorDeletion(item, trash.MoveToTrash(item.FilePath)));
+        {
+            TrashResult result = trash.MoveToTrash(item.FilePath);
+            if (result.Ok)
+            {
+                _audit.Record(new AuditEntry
+                {
+                    Path = item.FilePath,
+                    Action = AuditAction.MirrorDeletion,
+                    Destination = result.TrashedPath,
+                    Timestamp = _clock(),
+                    JobId = auditId,
+                });
+            }
+
+            deletions.Add(new MirrorDeletion(item, result));
+        }
 
         return new MirrorExecution(deletions);
     }
 
     /// <summary>Plans then executes in one call (the scheduler's post-placement step).</summary>
-    public MirrorExecution Reconcile(Profile profile) => Execute(Plan(profile));
+    public MirrorExecution Reconcile(Profile profile) => Execute(Plan(profile), profile.ProfileId);
 
     private HashSet<string> BuildSourceKeySet(Profile profile, TargetLayout layout)
     {

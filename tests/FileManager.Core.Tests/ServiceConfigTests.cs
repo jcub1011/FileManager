@@ -106,6 +106,57 @@ public sealed class ServiceConfigTests
     }
 
     [Fact]
+    public void JournalRotationSizeBytes_DefaultsAndRoundTrips()
+    {
+        Assert.Equal(ServiceConfig.DefaultJournalRotationSizeBytes, new ServiceConfig().JournalRotationSizeBytes);
+
+        var original = new ServiceConfig { JournalRotationSizeBytes = 3_000_000 };
+        string json = ProfileSerializer.Serialize(original);
+        ServiceConfig? roundTripped = ProfileSerializer.DeserializeServiceConfig(json);
+
+        Assert.NotNull(roundTripped);
+        Assert.Equal(3_000_000, roundTripped!.JournalRotationSizeBytes);
+    }
+
+    [Fact]
+    public void LoadFrom_OmittedJournalRotation_FallsBackToDefault()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "fp-config-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, """{ "MaxWorkers": 2 }""");
+
+        try
+        {
+            ServiceConfigLoadResult result = ServiceConfigStore.LoadFrom(path);
+
+            Assert.True(result.IsValid, string.Join("|", result.Validation.Errors));
+            Assert.Equal(ServiceConfig.DefaultJournalRotationSizeBytes, result.Config.JournalRotationSizeBytes);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void LoadFrom_InvalidJournalRotation_ReportsValidationError()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "fp-config-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, """{ "JournalRotationSizeBytes": 0 }""");
+
+        try
+        {
+            ServiceConfigLoadResult result = ServiceConfigStore.LoadFrom(path);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Validation.Errors, e => e.Path == nameof(ServiceConfig.JournalRotationSizeBytes));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void MinFreeSpaceMarginBytes_DefaultsToZero_AndRoundTrips()
     {
         Assert.Equal(0, new ServiceConfig().MinFreeSpaceMarginBytes);

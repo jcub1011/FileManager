@@ -1,7 +1,9 @@
 using System.IO;
+using FileManager.Core.Audit;
 using FileManager.Core.Disposition;
 using FileManager.Core.Filtering;
 using FileManager.Core.IO;
+using FileManager.Core.Journal;
 using FileManager.Core.Logging;
 using FileManager.Core.Metadata;
 using FileManager.Core.Profiles;
@@ -32,6 +34,8 @@ public sealed class JobEngine
     private readonly RollbackEngine _rollbackEngine;
     private readonly IFreeSpaceProbe _freeSpace;
     private readonly SpaceReservationLedger _ledger;
+    private readonly IJournal _journal;
+    private readonly IAuditLog _audit;
     private readonly string _trashDirectory;
     private readonly string _pipelineTempRoot;
     private readonly string _stagingRoot;
@@ -59,7 +63,9 @@ public sealed class JobEngine
         RollbackEngine rollbackEngine,
         IFreeSpaceProbe freeSpace,
         SpaceReservationLedger ledger,
-        JobEngineOptions? options = null)
+        JobEngineOptions? options = null,
+        IJournal? journal = null,
+        IAuditLog? audit = null)
     {
         _files = files;
         _log = log;
@@ -72,6 +78,11 @@ public sealed class JobEngine
         _rollbackEngine = rollbackEngine;
         _freeSpace = freeSpace;
         _ledger = ledger;
+        // Durable journal + deletion audit trail (M4). Default to no-op so existing constructors and
+        // tests behave exactly as before; real instances are threaded through the convenience paths or
+        // injected directly via this full constructor (mirroring the optional verifier pattern).
+        _journal = journal ?? NullJournal.Instance;
+        _audit = audit ?? NullAuditLog.Instance;
         JobEngineOptions effective = options ?? new JobEngineOptions();
         _trashDirectory = effective.ResolveTrashDirectory();
         _pipelineTempRoot = effective.ResolvePipelineTempRoot();
@@ -93,14 +104,27 @@ public sealed class JobEngine
     /// will instead inject one <b>shared</b> ledger (via the full constructor) across the worker pool,
     /// so concurrent Jobs writing to the same volume see each other's outstanding reservations.
     /// </remarks>
-    public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
-        : this(files, log, processRunner, options ?? new JobEngineOptions())
+    public JobEngine(
+        IFileOperations files,
+        ILogSink log,
+        JobEngineOptions? options = null,
+        IProcessRunner? processRunner = null,
+        IJournal? journal = null,
+        IAuditLog? audit = null)
+        : this(files, log, processRunner, options ?? new JobEngineOptions(), journal, audit)
     {
     }
 
     // Resolves the standard collaborators against a single, already-resolved JobEngineOptions instance
-    // (so the defaults aren't reallocated and every collaborator sees the same options).
-    private JobEngine(IFileOperations files, ILogSink log, IProcessRunner? processRunner, JobEngineOptions effective)
+    // (so the defaults aren't reallocated and every collaborator sees the same options). The journal and
+    // audit trail (M4) flow straight through to the full constructor.
+    private JobEngine(
+        IFileOperations files,
+        ILogSink log,
+        IProcessRunner? processRunner,
+        JobEngineOptions effective,
+        IJournal? journal,
+        IAuditLog? audit)
         : this(
             files,
             log,
@@ -117,7 +141,9 @@ public sealed class JobEngine
             new RollbackEngine(files),
             new SystemFreeSpaceProbe(),
             new SpaceReservationLedger(new SystemFreeSpaceProbe(), effective.MinFreeSpaceMarginBytes),
-            effective)
+            effective,
+            journal,
+            audit)
     {
     }
 
@@ -140,6 +166,32 @@ public sealed class JobEngine
             if (VerbosityFilter.ShouldEmit(profile.Logging.Verbosity, severity))
                 _log.Log(entry);
         }
+
+        // Builds a journal record for this Job stamped with the standard identity + clock. Artifact
+        // fields (temp/final/staged) and the disposition are supplied per event.
+        JournalRecord NewRecord(
+            JournalEventType evt,
+            string? tempPath = null,
+            string? finalPath = null,
+            string? stagedPath = null,
+            string? stagedOriginalPath = null,
+            OnSuccess? disposition = null,
+            string? dispositionPath = null) =>
+            new()
+            {
+                SchemaVersion = JournalRecord.CurrentSchemaVersion,
+                Event = evt,
+                JobId = jobId,
+                ProfileId = profile.ProfileId,
+                SourcePath = source,
+                Timestamp = context.Now,
+                TempPath = tempPath,
+                FinalPath = finalPath,
+                StagedPath = stagedPath,
+                StagedOriginalPath = stagedOriginalPath,
+                Disposition = disposition,
+                DispositionPath = dispositionPath,
+            };
 
         JobResult Failed(string reason)
         {
@@ -189,6 +241,11 @@ public sealed class JobEngine
             return Failed($"Could not read source metadata: {ex.Message}");
         }
 
+        // Journal OPEN (§4 Phase 1 / §6.3): the Job is now durably on record. Recovery will see it as
+        // open until a Closed marker is written, and the chosen disposition policy travels with it so
+        // recovery can reason about (but never perform) source disposition.
+        _journal.Open(NewRecord(JournalEventType.Open, disposition: profile.Policies.OnSuccess));
+
         // Phase 2 — Filter screening.
         FilterSet effective = FilterEvaluator.ResolveEffective(profile.Filters, owningSource.Filters);
         string relativePath = PathNormalizer.GetRelativePath(sourceRoot, source);
@@ -214,6 +271,9 @@ public sealed class JobEngine
         if (!decision.Included)
         {
             Emit(LogSeverity.Skip, "SKIPPED", $"{fileName}: rejected by {decision.DecidingFilter}");
+            // Screened out: nothing was copied, the source is untouched, so the Job is fully resolved —
+            // close the journal entry so recovery never reconsiders it.
+            _journal.Close(jobId);
             return new JobResult
             {
                 JobId = jobId,
@@ -223,6 +283,9 @@ public sealed class JobEngine
                 Logs = logs,
             };
         }
+
+        // Journal SCREENED (§4 Phase 2): the file passed filtering and is headed for distribution.
+        _journal.Record(NewRecord(JournalEventType.Screened));
 
         // The file that Targets actually receive. Without a transformer chain this is the original
         // source; with one it becomes the chain's final working file (possibly renamed/re-extensioned).
@@ -244,6 +307,10 @@ public sealed class JobEngine
         // sitting in the staging area, so the finally teardown must NOT delete it (that would destroy
         // the user's last copy of the prior Target file). M4's journal makes this resumable.
         bool preserveStaging = false;
+
+        // Set once every Target was placed and verified (and the AllTargetsVerified journal fact was
+        // recorded). Phase 6 asserts this before any source disposition — the §6.3 invariant in code.
+        bool allTargetsVerified = false;
 
         // The verifier is the injected one (tests) or, for production, selected from the Profile.
         IVerifier verifier = _verifier
@@ -284,6 +351,10 @@ public sealed class JobEngine
                 {
                     return Failed($"Could not read transformed file metadata: {ex.Message}");
                 }
+
+                // Journal TRANSFORMED (§4 Phase 3): the transformer chain produced the file that
+                // Targets will receive.
+                _journal.Record(NewRecord(JournalEventType.Transformed));
             }
 
             // Phases 4–5 — Distribution + verification to every Target. Per Target the engine writes a
@@ -339,6 +410,10 @@ public sealed class JobEngine
 
             reservation = spaceResult.Handle;
 
+            // Journal SPACE_RESERVED (§3.3): the bytes every Target write will consume are reserved
+            // before a single byte is written.
+            _journal.Record(NewRecord(JournalEventType.SpaceReserved));
+
             // RollbackThenFail runs the §3.3 rollback, logs it, and returns the Failed result.
             JobResult RollbackThenFail(string reason)
             {
@@ -359,6 +434,12 @@ public sealed class JobEngine
                     Emit(LogSeverity.Failure, "STAGING_PRESERVED",
                         $"{distFileName}: {unrestored} prior Target version(s) could not be restored and remain in {staging.Root}");
                 }
+
+                // Journal ROLLED_BACK (§6.3): the Job's placements were undone (and staged originals
+                // restored, except any preserved ones noted above). Recovery treats a rolled-back-then-
+                // closed Job as fully resolved; an interrupted rollback is re-driven from the artifacts.
+                _journal.Record(NewRecord(JournalEventType.RolledBack));
+                _journal.Close(jobId);
 
                 return Failed(reason);
             }
@@ -395,6 +476,10 @@ public sealed class JobEngine
 
                     Emit(LogSeverity.Info, "VERIFIED", $"{distFileName} → {finalPath}");
 
+                    // Journal TARGET_VERIFIED: the temp exists and was verified but is not yet promoted.
+                    // Recording its path lets recovery delete an orphaned temp left by a mid-rename crash.
+                    _journal.Record(NewRecord(JournalEventType.TargetVerified, tempPath: temp));
+
                     // Under StageOverwrites, move the prior version aside immediately before the rename
                     // so rollback can restore it byte-for-byte.
                     if (plan.Overwrite && stageOverwrites && _files.FileExists(finalPath))
@@ -403,12 +488,21 @@ public sealed class JobEngine
                         string stagedPath = staging.Stage(finalPath);
                         rollback.RecordStaged(stagedPath, finalPath);
                         Emit(LogSeverity.Info, "STAGED", $"{finalPath} → staged prior version");
+
+                        // Journal TARGET_STAGED: the prior version's staged location + restore target,
+                        // so recovery can put it back if the Job is rolled back.
+                        _journal.Record(NewRecord(
+                            JournalEventType.TargetStaged, stagedPath: stagedPath, stagedOriginalPath: finalPath));
                     }
 
                     // Atomic rename into place; the temp is now a fresh final to remove on rollback.
                     AtomicFileWriter.Promote(_files, temp, finalPath, plan.Overwrite);
                     rollback.RecordPromotion(temp, finalPath);
                     Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {finalPath} ({plan.Action})");
+
+                    // Journal TARGET_PLACED: the temp became this final. Recovery now treats the final
+                    // (not the temp) as the artifact to remove on rollback.
+                    _journal.Record(NewRecord(JournalEventType.TargetPlaced, tempPath: temp, finalPath: finalPath));
 
                     // Best-effort metadata preservation; a FailJob-detected loss rolls back.
                     MetadataResult metadata = _metadataCopier.Copy(
@@ -433,6 +527,11 @@ public sealed class JobEngine
 
             // Success — the staged prior versions are no longer needed.
             staging?.DiscardAll();
+
+            // Journal ALL_TARGETS_VERIFIED (§6.3): every Target write was placed and verified. This is
+            // the durable fact that GATES source disposition — Phase 6 below asserts it was recorded.
+            allTargetsVerified = true;
+            _journal.Record(NewRecord(JournalEventType.AllTargetsVerified));
         }
         finally
         {
@@ -453,6 +552,10 @@ public sealed class JobEngine
         if (!anyWritten)
         {
             Emit(LogSeverity.Skip, "DISPOSED", $"{fileName}: all targets skipped; source left in place");
+            // Nothing was copied and the source is untouched — the Job is fully resolved. Close the
+            // journal entry (no AllTargetsVerified is required here precisely because the source is
+            // NOT being disposed).
+            _journal.Close(jobId);
             return new JobResult
             {
                 JobId = jobId,
@@ -463,6 +566,14 @@ public sealed class JobEngine
                 Logs = logs,
             };
         }
+
+        // §6.3 invariant, enforced in code: the source must never be disposed unless the journal
+        // durably recorded that every Target was verified. Reaching disposition without that fact is a
+        // programmer error in the lifecycle, not an I/O failure — fail loudly rather than risk a
+        // disposed source with missing copies.
+        if (!allTargetsVerified)
+            throw new InvalidOperationException(
+                "Source disposition attempted before AllTargetsVerified was journaled — refusing to dispose.");
 
         DispositionOutcome disposition;
         try
@@ -476,6 +587,23 @@ public sealed class JobEngine
         }
 
         Emit(LogSeverity.Info, "DISPOSED", $"{fileName}: {disposition.Action}");
+
+        // Journal DISPOSED + the deletion audit trail (§7): record what happened to the source.
+        _journal.Record(NewRecord(
+            JournalEventType.Disposed,
+            disposition: disposition.Action,
+            dispositionPath: disposition.ResultPath));
+        _audit.Record(new AuditEntry
+        {
+            Path = source,
+            Action = ToAuditAction(disposition.Action),
+            Destination = disposition.ResultPath,
+            Timestamp = context.Now,
+            JobId = jobId,
+        });
+
+        // Journal CLOSED (§4 Phase 6): the Job is fully resolved; recovery will never reconsider it.
+        _journal.Close(jobId);
 
         return new JobResult
         {
@@ -537,6 +665,16 @@ public sealed class JobEngine
 
         return depth;
     }
+
+    /// <summary>Maps a source-disposition <see cref="OnSuccess"/> policy to its audit-trail action.</summary>
+    private static AuditAction ToAuditAction(OnSuccess disposition) => disposition switch
+    {
+        OnSuccess.KeepSource => AuditAction.KeepSource,
+        OnSuccess.MoveToTrash => AuditAction.MoveToTrash,
+        OnSuccess.MoveToArchive => AuditAction.MoveToArchive,
+        OnSuccess.PermanentDelete => AuditAction.PermanentDelete,
+        _ => AuditAction.KeepSource,
+    };
 
     // Only genuine I/O faults resolve to a Failed Job. ArgumentException/InvalidOperationException
     // signal programmer/config error (e.g. a malformed path, or MoveToArchive without ArchiveFolder —

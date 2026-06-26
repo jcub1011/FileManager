@@ -1,5 +1,7 @@
 using System.Text.Json;
+using FileManager.Core.Audit;
 using FileManager.Core.Configuration;
+using FileManager.Core.Journal;
 
 namespace FileManager.Core.Profiles;
 
@@ -51,6 +53,64 @@ public static class ProfileSerializer
         catch (JsonException ex)
         {
             profile = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Serializes a journal record (M4 durable journal framing) as a single compact line.</summary>
+    public static string Serialize(JournalRecord record) =>
+        JsonSerializer.Serialize(record, DurableJsonContext.Default.JournalRecord);
+
+    /// <summary>
+    /// Attempts to deserialize a journal record, capturing any JSON error as a message instead of
+    /// throwing. A framed record whose payload is malformed (e.g. a torn write that passed the length
+    /// check) deserializes to <c>false</c>, letting the reader stop cleanly at the tail.
+    /// </summary>
+    public static bool TryDeserializeJournalRecord(string json, out JournalRecord? record, out string? error)
+    {
+        try
+        {
+            record = JsonSerializer.Deserialize(json, DurableJsonContext.Default.JournalRecord);
+            if (record is null)
+            {
+                error = "Document deserialized to null.";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            record = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Serializes a deletion-audit entry (M4 audit trail) as a single compact line.</summary>
+    public static string Serialize(AuditEntry entry) =>
+        JsonSerializer.Serialize(entry, DurableJsonContext.Default.AuditEntry);
+
+    /// <summary>Attempts to deserialize an audit entry, capturing any JSON error as a message.</summary>
+    public static bool TryDeserializeAuditEntry(string json, out AuditEntry? entry, out string? error)
+    {
+        try
+        {
+            entry = JsonSerializer.Deserialize(json, DurableJsonContext.Default.AuditEntry);
+            if (entry is null)
+            {
+                error = "Document deserialized to null.";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            entry = null;
             error = ex.Message;
             return false;
         }
