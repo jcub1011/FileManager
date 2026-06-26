@@ -142,7 +142,10 @@ A Profile may enable any combination of:
 * **Manual Shell Invocation:** right-click context-menu action on a file or folder. On a folder,
   descent is recursive subject to the Profile's `MaxDepth` filter. **Profile selection:** the engine
   **always prompts the user to pick** which Profile to run for the invoked path (even when exactly
-  one matches), so a manual action is never ambiguous or surprising.
+  one matches), so a manual action is never ambiguous or surprising. The prompt lists the Profiles
+  whose Sources/filters match the invoked path; if none match (e.g. the path lies outside every
+  configured Source), the prompt is never an empty dead end — it always offers a **"Create Profile…"**
+  action that opens the configuration GUI pre-seeded with the invoked path.
 * **Reactive File Watcher:** continuous monitoring of Source roots. A configurable per-Source
   **settle policy** decides when a file is ready ([§3.2.1](#321-file-readiness-settle-policy)).
 * **Scheduled / Interval:** cron expression or fixed interval. Each scheduled Profile declares a
@@ -399,7 +402,10 @@ migration. Paths are **machine/OS-specific** and absolute (Profiles are not port
 > `ConflictResolution ∈ {Overwrite, OverwriteIfNewer, RenameSuffix, Skip}`;
 > `OverwriteHandling ∈ {DirectOverwrite, StageOverwrites}`;
 > `SyncMode ∈ {AdditiveArchive, Mirror}`; `TargetLayout ∈ {PreserveStructure, Flatten}`;
-> `MetadataOnConflict ∈ {WarnAndContinue, FailJob}`.
+> `MetadataOnConflict ∈ {WarnAndContinue, FailJob}`;
+> `OnFailure ∈ {AbortRestoreAndClean}` (single value today; the enum exists as an extension point —
+> the §3.3 rollback behavior is what `AbortRestoreAndClean` denotes);
+> `Verbosity ∈ {FailuresOnly, FailuresAndSkips, All}` (see [§7](#7-observability-logging--notifications)).
 
 ### 5.2 Tokens
 
