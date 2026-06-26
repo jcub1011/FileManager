@@ -1,0 +1,26 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.cs]
+# C# style: file-scoped namespaces, records, required members.
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_prefer_braces = true:suggestion
+dotnet_style_require_accessibility_modifiers = always:warning
+
+# Treat reflection/trim/AOT analyzer findings as build warnings (already on via IsAotCompatible).
+dotnet_diagnostic.IL2026.severity = warning
+dotnet_diagnostic.IL3050.severity = warning

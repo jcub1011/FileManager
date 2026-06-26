@@ -98,8 +98,8 @@ while supporting the four directory topologies in [§3.1](#31-directory-topologi
 ### 2.1 IPC transport
 
 GUI↔Service and Shell↔Service communication uses a **local-only transport**: a named pipe on
-Windows (`\\.\pipe\filepipeline-<user>`) and a Unix domain socket on Linux
-(`$XDG_RUNTIME_DIR/filepipeline.sock`). No network listener is opened. The wire format is
+Windows (`\\.\pipe\filemanager-<user>`) and a Unix domain socket on Linux
+(`$XDG_RUNTIME_DIR/filemanager.sock`). No network listener is opened. The wire format is
 length-prefixed JSON messages.
 
 ---
@@ -445,7 +445,7 @@ literal dollar is escaped `$$`. Token names are case-sensitive.
 #### Installation & autostart
 
 Windows: per-user install; the Core Service is registered as a logon startup task. Linux: a
-`systemd --user` unit (`filepipeline.service`) enabled for the user. The service runs without a tray
+`systemd --user` unit (`filemanager.service`) enabled for the user. The service runs without a tray
 if none is available.
 
 ### 5.4 Concurrency & Locking

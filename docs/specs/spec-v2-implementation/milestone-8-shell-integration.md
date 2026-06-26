@@ -60,17 +60,17 @@ top-level context entry (with a Windows 10 / classic fallback) and per-file-mana
 ## Proposed structure
 
 ```
-src/FilePipeline.Shell/Windows/
+src/FileManager.Shell/Windows/
   ExplorerCommandHandler.cs (IExplorerCommand COM), RegistryVerbs.cs,
   msix/AppxManifest.xml (sparse package)
-src/FilePipeline.Shell/Linux/
+src/FileManager.Shell/Linux/
   FileManagerDetector.cs, NautilusAction.cs, DolphinServiceMenu.cs, NemoThunarActions.cs,
   templates/*.desktop, *.nemo_action
-src/FilePipeline.Shell/
+src/FileManager.Shell/
   ShellPayload.cs, RegistrationInstaller.cs
-src/FilePipeline.Service/  (chooser routing)
+src/FileManager.Service/  (chooser routing)
   ManualInvocationRouter.cs
-src/FilePipeline.Gui/Views/
+src/FileManager.Gui/Views/
   ProfileChooserDialog.axaml(.cs)
 ```
 

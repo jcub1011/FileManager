@@ -1,8 +1,8 @@
-namespace FileManager.Models;
+namespace FileManager.Core.FileSystem;
 
 /// <summary>
 /// A single file-system entry (file, directory, or drive root). Immutable snapshot
-/// produced by <see cref="Services.IFileSystemService"/>.
+/// produced by <see cref="IFileSystemService"/>.
 /// </summary>
 public sealed record FileSystemEntry(
     string Name,

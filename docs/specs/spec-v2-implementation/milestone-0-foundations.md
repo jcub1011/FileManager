@@ -12,7 +12,7 @@ pipeline builds and tests on Windows and Linux. No file processing happens yet.
 
 - §0 Glossary — terminology (Profile, Job, Source, Target, Transformer, Engine, Payload).
 - §1 / §2 — product framing and the three-component architecture (only the project skeleton here).
-- §2.1 — IPC transport names (define the `FilePipeline.Contracts` project and pipe/socket name
+- §2.1 — IPC transport names (define the `FileManager.Contracts` project and pipe/socket name
   constants; transport implementation is M6).
 - §5.1 — Profile schema (JSON), one file per Profile, `SchemaVersion`, enum authority.
 - Appendix B — flag the open items this milestone touches (config/log/journal locations; per-OS path
@@ -41,11 +41,11 @@ pipeline builds and tests on Windows and Linux. No file processing happens yet.
 - [ ] Create the solution layout and `Directory.Build.props` (shared `net10.0`, `Nullable=enable`,
       `IsAotCompatible=true`, analyzers). Add a `.editorconfig` matching the existing code style
       (file-scoped namespaces, records, `required` members).
-- [ ] Create `src/FilePipeline.Core` (class library) and `src/FilePipeline.Contracts` (class library).
+- [ ] Create `src/FileManager.Core` (class library) and `src/FileManager.Contracts` (class library).
 - [ ] Migrate reusable scaffold pieces: `IFileSystemService` / `FileSystemService` /
-      `FileSystemEntry` into `FilePipeline.Core` (kept for path enumeration / GUI path-picking).
-- [ ] Retire `src/FileManager` and update `FileManager.slnx` (rename to `FilePipeline.slnx`) to
-      reference the new projects.
+      `FileSystemEntry` into `FileManager.Core` (kept for path enumeration / GUI path-picking).
+- [ ] Retire the old `src/FileManager` GUI project and update `FileManager.slnx` to reference the
+      new projects.
 - [ ] Implement the Profile model as records: `Profile`, `ScheduleTrigger`, `TriggerSet`,
       `SourceSpec`, `TransformerStep`, `TargetSpec`, `PolicySet`, `FilterSet`, `AttributeFilter`,
       `LoggingSpec`.
@@ -58,17 +58,17 @@ pipeline builds and tests on Windows and Linux. No file processing happens yet.
 - [ ] Schema validation: required fields, `SchemaVersion` check, enum membership, cross-field rules
       (e.g. `OnSuccess=MoveToArchive` requires `ArchiveFolder`; `NewFile` step requires
       `ExpectedOutputExtension`). Produce a structured list of validation errors, not exceptions.
-- [ ] Config-directory resolver: Windows `%APPDATA%\FilePipeline\`, Linux
-      `$XDG_CONFIG_HOME/filepipeline/` (fallback `~/.config/filepipeline/`); `profiles/` subfolder.
+- [ ] Config-directory resolver: Windows `%APPDATA%\FileManager\`, Linux
+      `$XDG_CONFIG_HOME/filemanager/` (fallback `~/.config/filemanager/`); `profiles/` subfolder.
 - [ ] `ProfileStore` that discovers and loads all `profiles/*.json`, returning loaded Profiles plus
       per-file validation results.
 - [ ] `ServiceConfig` record + loader (`config.json` in the config dir): `MaxWorkers`, `Allowlist`
       (nullable list), and log/journal/audit location + rotation-size settings, all with documented
       defaults; validated like Profiles. Consumed in M5 (`MaxWorkers`), M6 (host wiring), M9
       (allowlist), and M4/M7 (log locations).
-- [ ] Define IPC name constants in `FilePipeline.Contracts`: `\\.\pipe\filepipeline-<user>` /
-      `$XDG_RUNTIME_DIR/filepipeline.sock` (constants + helpers only).
-- [ ] `tests/FilePipeline.Core.Tests` (xUnit): schema round-trip of the §5.1 sample, validation
+- [ ] Define IPC name constants in `FileManager.Contracts`: `\\.\pipe\filemanager-<user>` /
+      `$XDG_RUNTIME_DIR/filemanager.sock` (constants + helpers only).
+- [ ] `tests/FileManager.Core.Tests` (xUnit): schema round-trip of the §5.1 sample, validation
       success/failure cases, config-path resolution per OS.
 - [ ] CI workflow (`.github/workflows/build.yml`): restore/build/test matrix on
       `windows-latest` + `ubuntu-latest`.
@@ -77,19 +77,19 @@ pipeline builds and tests on Windows and Linux. No file processing happens yet.
 ## Proposed structure
 
 ```
-FilePipeline.slnx
+FileManager.slnx
 Directory.Build.props
 .editorconfig
-src/FilePipeline.Core/
+src/FileManager.Core/
   FileSystem/    IFileSystemService.cs, FileSystemService.cs, FileSystemEntry.cs   (migrated)
   Profiles/      Profile.cs, TriggerSet.cs, SourceSpec.cs, TransformerStep.cs,
                  TargetSpec.cs, PolicySet.cs, FilterSet.cs, LoggingSpec.cs
   Profiles/Enums.cs
   Profiles/ProfileStore.cs, ProfileValidator.cs, ProfileJsonContext.cs (source-gen)
   Configuration/ ConfigPaths.cs, ServiceConfig.cs, ServiceConfigStore.cs
-src/FilePipeline.Contracts/
+src/FileManager.Contracts/
   IpcNames.cs
-tests/FilePipeline.Core.Tests/
+tests/FileManager.Core.Tests/
 .github/workflows/build.yml
 ```
 

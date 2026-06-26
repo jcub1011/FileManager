@@ -1,0 +1,84 @@
+{
+  "SchemaVersion": 2,
+  "ProfileId": "e2a3c4b5-1234-4a5b-8c9d-0123456789ab",
+  "Name": "Chained Audio Optimization Pipeline",
+  "Active": true,
+
+  "SyncMode": "AdditiveArchive",
+  "TargetLayout": "PreserveStructure",
+
+  "Triggers": {
+    "ManualShell": true,
+    "Watcher": true,
+    "Schedule": {
+      "Enabled": false,
+      "Cron": "0 */6 * * *",
+      "Timezone": "America/Chicago",
+      "MissedRunPolicy": "CatchUpOnce"
+    }
+  },
+
+  "Sources": [
+    {
+      "Path": "C:\\dropzone\\raw",
+      "SettleDelaySeconds": 2,
+      "StabilityIntervalMs": 500,
+      "Filters": null
+    }
+  ],
+
+  "Transformers": [
+    {
+      "Step": 1,
+      "Name": "FFMPEG Audio Transcoder",
+      "ExecutablePath": "C:\\tools\\ffmpeg.exe",
+      "ArgumentMode": "Literal",
+      "Arguments": "-i $step_input_path -b:a 320k $step_output_path",
+      "OutputMode": "NewFile",
+      "ExpectedOutputExtension": ".mp3",
+      "SuccessExitCodes": [0],
+      "TimeoutSeconds": 120
+    },
+    {
+      "Step": 2,
+      "Name": "ID3 Metadata Tagger",
+      "ExecutablePath": "C:\\tools\\mid3v2.exe",
+      "ArgumentMode": "Literal",
+      "Arguments": "--artist=Production $step_input_path",
+      "OutputMode": "InPlace",
+      "TimeoutSeconds": 30
+    }
+  ],
+
+  "Targets": [
+    { "Path": "C:\\archive\\local" },
+    { "Path": "Z:\\vault" }
+  ],
+
+  "Policies": {
+    "ConflictResolution": "RenameSuffix",
+    "OverwriteHandling": "StageOverwrites",
+    "VerificationMethod": "SHA256",
+    "OnSuccess": "MoveToTrash",
+    "ArchiveFolder": null,
+    "OnFailure": "AbortRestoreAndClean",
+    "MetadataOnConflict": "WarnAndContinue"
+  },
+
+  "Filters": {
+    "Include": ["*.wav", "*.flac"],
+    "ExcludeGlob": [".DS_Store", "Thumbs.db"],
+    "IncludeRegex": null,
+    "ExcludeRegex": null,
+    "MinSizeBytes": null,
+    "MaxSizeBytes": null,
+    "ModifiedWithin": null,
+    "ModifiedOlderThan": null,
+    "CreatedWithin": null,
+    "Attributes": { "IncludeHidden": false, "IncludeSystem": false, "FollowSymlinks": false },
+    "MaxDepth": null,
+    "ContentHashDedupe": false
+  },
+
+  "Logging": { "Verbosity": "FailuresAndSkips", "NotifyOnFailure": true }
+}

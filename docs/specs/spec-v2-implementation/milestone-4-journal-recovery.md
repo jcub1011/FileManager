@@ -64,15 +64,15 @@ audit trail** records every disposition and Mirror deletion.
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Journal/
+src/FileManager.Core/Journal/
   IJournal.cs, FileJournal.cs, JournalRecord.cs, JournalFraming.cs
-src/FilePipeline.Core/Recovery/
+src/FileManager.Core/Recovery/
   RecoveryService.cs
-src/FilePipeline.Core/Audit/
+src/FileManager.Core/Audit/
   AuditLog.cs, AuditEntry.cs
-src/FilePipeline.Core/Logging/
+src/FileManager.Core/Logging/
   RotatingLogWriter.cs (Verbosity-filtered persistent app log)
-src/FilePipeline.Core/Jobs/
+src/FileManager.Core/Jobs/
   JobEngine.cs (journal integration at phase boundaries)
 ```
 

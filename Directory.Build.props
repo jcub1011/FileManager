@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    Shared build settings for all FileManager projects. Individual csproj files
+    inherit these automatically (MSBuild walks up the directory tree).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!--
+      Turn on trim/AOT analyzers so reflection leaks surface as build warnings.
+      PublishAot is passed at publish time, not set here, to keep dev builds fast.
+    -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+</Project>

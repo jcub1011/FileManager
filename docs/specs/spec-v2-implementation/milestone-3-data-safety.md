@@ -67,15 +67,15 @@ promise real (durability across crashes is M4).
 ## Proposed structure
 
 ```
-src/FilePipeline.Core/Verification/
+src/FileManager.Core/Verification/
   IVerifier.cs, SizeTimestampVerifier.cs, Sha256Verifier.cs, NoneVerifier.cs
-src/FilePipeline.Core/Safety/
+src/FileManager.Core/Safety/
   RollbackEngine.cs, RollbackContext.cs, StagingArea.cs, SafetyAnalyzer.cs
-src/FilePipeline.Core/Sync/
+src/FileManager.Core/Sync/
   MirrorPlanner.cs
-src/FilePipeline.Core/Trash/
+src/FileManager.Core/Trash/
   ITrashService.cs, WindowsRecycleBin.cs (IFileOperation interop), LinuxTrash.cs
-src/FilePipeline.Core/Metadata/
+src/FileManager.Core/Metadata/
   MetadataCopier.cs
 ```
 

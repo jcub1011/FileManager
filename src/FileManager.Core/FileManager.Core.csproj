@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FileManager.Core</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    No external package references: System.Text.Json (including the source generator)
+    ships in the net10.0 SDK. Keeping the dependency surface empty preserves the
+    AOT-clean guarantee for the engine library.
+  -->
+
+</Project>

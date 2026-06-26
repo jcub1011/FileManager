@@ -1,9 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
-using FileManager.Models;
 
-namespace FileManager.Services;
+namespace FileManager.Core.FileSystem;
 
 /// <summary>
 /// <see cref="System.IO"/>-based implementation. Reflection-free and platform-neutral:
