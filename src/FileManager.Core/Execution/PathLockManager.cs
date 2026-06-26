@@ -44,7 +44,7 @@ public sealed class PathLockManager
     // Entry can be removed (keeping the dictionary bounded under high path churn). All mutation of
     // _locks, the ref-counts, and a key's queue/held flag is guarded by _gate.
     private readonly Dictionary<string, Entry> _locks;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>Creates an empty lock manager.</summary>
     public PathLockManager()

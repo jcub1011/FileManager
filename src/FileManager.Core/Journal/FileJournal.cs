@@ -42,7 +42,7 @@ public sealed class FileJournal : IJournal
     // frame with another's, race compaction against an active append, or read a half-written tail. A
     // single lock is sufficient: the per-record fsync already dominates the cost of a journal write, so
     // the contention here is far cheaper than the durability barrier it guards.
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private IDurableAppendWriter _writer;
 

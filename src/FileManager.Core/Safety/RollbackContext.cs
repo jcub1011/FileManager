@@ -18,7 +18,7 @@ public sealed class RollbackContext
     private readonly List<string> _unpromotedTemps = new();
     private readonly List<string> _placedFinals = new();
     private readonly List<StagedOriginal> _stagedOriginals = new();
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>A prior Target version moved aside under <c>StageOverwrites</c> and where to restore it.</summary>
     public sealed record StagedOriginal(string StagedPath, string OriginalPath);

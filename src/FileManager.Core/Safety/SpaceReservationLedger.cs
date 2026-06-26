@@ -73,7 +73,7 @@ public sealed class SpaceReservationLedger
     private readonly IFreeSpaceProbe _probe;
     private readonly long _marginBytes;
     private readonly Dictionary<string, long> _reserved = new();
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>
     /// Creates a ledger over <paramref name="probe"/>. <paramref name="marginBytes"/> is a headroom

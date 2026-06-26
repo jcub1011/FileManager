@@ -98,7 +98,7 @@ public sealed class SystemProcessRunner : IProcessRunner
     private sealed class CappedBuffer(int capBytes)
     {
         private readonly StringBuilder _sb = new();
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
         private bool _capped;
 
         public void AppendLine(string? data)

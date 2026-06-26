@@ -35,7 +35,7 @@ public sealed class LastRunStore
     public const string DefaultFileName = "schedule-state.json";
 
     private readonly string _path;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private LastRunState _state;
 
     /// <summary>The resolved state-file path.</summary>

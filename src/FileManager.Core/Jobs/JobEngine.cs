@@ -177,7 +177,7 @@ public sealed class JobEngine
         string source = PathNormalizer.Normalize(sourcePath);
         string fileName = Path.GetFileName(source);
         var logs = new List<JobLogEntry>();
-        var logGate = new object();
+        var logGate = new Lock();
 
         void Emit(LogSeverity severity, string code, string message)
         {
@@ -477,7 +477,7 @@ public sealed class JobEngine
             // engine did. The PathLockManager serializes any two Jobs that would touch the same final
             // path (§5.4). `outcomeSlots` is filled positionally so per-Target order matches the Profile.
             var outcomeSlots = new TargetOutcome?[profile.Targets.Count];
-            var stagingGate = new object();
+            var stagingGate = new Lock();
 
             // Runs one Target's distribution. Returns null on success/skip, or a failure reason on the
             // first I/O / verification / metadata failure — mirroring the sequential engine's fail-fast.

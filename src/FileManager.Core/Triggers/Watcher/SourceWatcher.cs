@@ -36,7 +36,7 @@ public sealed class SourceWatcher : IDisposable
     // Per-file debounce state: the last event time. Guarded by _gate (events may arrive on a watcher
     // thread while Tick runs on the host's pump thread).
     private readonly Dictionary<string, DateTimeOffset> _pending;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>
     /// Creates a watcher over <paramref name="watcher"/> (the FileSystemWatcher seam), emitting ready

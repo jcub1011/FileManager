@@ -30,7 +30,7 @@ public sealed class WorkerPoolTests
         int concurrent = 0;
         int peak = 0;
         int timeouts = 0;
-        var sync = new object();
+        var sync = new Lock();
 
         // Force saturation deterministically rather than relying on a sleep/overlap window (which is
         // racy on a loaded CI runner): a Barrier of maxWorkers parties only releases once that many

@@ -25,7 +25,7 @@ public sealed class AuditLog : IAuditLog
 
     // Serializes Record/RotateIfOversized so concurrent worker-pool Jobs (M5) cannot interleave two
     // entries' bytes or race rotation against an active append.
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private IDurableAppendWriter _writer;
 

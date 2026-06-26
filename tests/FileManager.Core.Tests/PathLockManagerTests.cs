@@ -19,7 +19,7 @@ public sealed class PathLockManagerTests
 
         int concurrent = 0;
         int peak = 0;
-        var sync = new object();
+        var sync = new Lock();
 
         void Body()
         {
@@ -101,7 +101,7 @@ public sealed class PathLockManagerTests
         var mgr = new PathLockManager();
         string path = P("fifo.txt");
         var order = new List<int>();
-        var orderGate = new object();
+        var orderGate = new Lock();
 
         // Hold the lock so every contender must queue behind it.
         IDisposable held = mgr.Acquire(path);

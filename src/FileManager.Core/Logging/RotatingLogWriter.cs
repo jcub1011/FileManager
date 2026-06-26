@@ -28,7 +28,7 @@ public sealed class RotatingLogWriter : ILogSink, IDisposable
     private readonly string _path;
     private readonly long _rotationSizeBytes;
     private readonly Func<DateTimeOffset> _clock;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     private FileStream _stream;
 
