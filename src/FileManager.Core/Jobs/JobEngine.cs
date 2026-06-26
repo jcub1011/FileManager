@@ -1,6 +1,7 @@
 using System.IO;
 using FileManager.Core.Audit;
 using FileManager.Core.Disposition;
+using FileManager.Core.Execution;
 using FileManager.Core.Filtering;
 using FileManager.Core.IO;
 using FileManager.Core.Journal;
@@ -36,6 +37,8 @@ public sealed class JobEngine
     private readonly SpaceReservationLedger _ledger;
     private readonly IJournal _journal;
     private readonly IAuditLog _audit;
+    private readonly PathLockManager _pathLocks;
+    private readonly int _targetParallelism;
     private readonly string _trashDirectory;
     private readonly string _pipelineTempRoot;
     private readonly string _stagingRoot;
@@ -65,7 +68,9 @@ public sealed class JobEngine
         SpaceReservationLedger ledger,
         JobEngineOptions? options = null,
         IJournal? journal = null,
-        IAuditLog? audit = null)
+        IAuditLog? audit = null,
+        PathLockManager? pathLocks = null,
+        int targetParallelism = 1)
     {
         _files = files;
         _log = log;
@@ -83,6 +88,14 @@ public sealed class JobEngine
         // injected directly via this full constructor (mirroring the optional verifier pattern).
         _journal = journal ?? NullJournal.Instance;
         _audit = audit ?? NullAuditLog.Instance;
+        // Same-file path lock (§5.4). When the host (M5 WorkerPool) shares one manager across all
+        // engines, two Jobs touching the same Target final path serialize FIFO. When omitted, a private
+        // per-engine manager keeps single-engine behavior correct (its acquires are uncontended).
+        _pathLocks = pathLocks ?? new PathLockManager();
+        // Bounded degree for the intra-Job per-Target distribution loop. Default 1 ⇒ strictly
+        // sequential, byte-for-byte identical to the M1 engine. >1 dispatches Targets in parallel
+        // (the host wires this from MaxWorkers); rollback/staging/disposition semantics are unchanged.
+        _targetParallelism = targetParallelism > 0 ? targetParallelism : 1;
         JobEngineOptions effective = options ?? new JobEngineOptions();
         _trashDirectory = effective.ResolveTrashDirectory();
         _pipelineTempRoot = effective.ResolvePipelineTempRoot();
@@ -110,8 +123,10 @@ public sealed class JobEngine
         JobEngineOptions? options = null,
         IProcessRunner? processRunner = null,
         IJournal? journal = null,
-        IAuditLog? audit = null)
-        : this(files, log, processRunner, options ?? new JobEngineOptions(), journal, audit)
+        IAuditLog? audit = null,
+        PathLockManager? pathLocks = null,
+        int targetParallelism = 1)
+        : this(files, log, processRunner, options ?? new JobEngineOptions(), journal, audit, pathLocks, targetParallelism)
     {
     }
 
@@ -124,7 +139,9 @@ public sealed class JobEngine
         IProcessRunner? processRunner,
         JobEngineOptions effective,
         IJournal? journal,
-        IAuditLog? audit)
+        IAuditLog? audit,
+        PathLockManager? pathLocks,
+        int targetParallelism)
         : this(
             files,
             log,
@@ -143,7 +160,9 @@ public sealed class JobEngine
             new SpaceReservationLedger(new SystemFreeSpaceProbe(), effective.MinFreeSpaceMarginBytes),
             effective,
             journal,
-            audit)
+            audit,
+            pathLocks,
+            targetParallelism)
     {
     }
 
@@ -158,13 +177,19 @@ public sealed class JobEngine
         string source = PathNormalizer.Normalize(sourcePath);
         string fileName = Path.GetFileName(source);
         var logs = new List<JobLogEntry>();
+        var logGate = new Lock();
 
         void Emit(LogSeverity severity, string code, string message)
         {
+            // Guarded because parallel per-Target distribution (M5) may emit from several threads at
+            // once; the in-memory log list and the sink call must not interleave or race.
             var entry = new JobLogEntry { Severity = severity, Code = code, JobId = jobId, Message = message };
-            logs.Add(entry);
-            if (VerbosityFilter.ShouldEmit(profile.Logging.Verbosity, severity))
-                _log.Log(entry);
+            lock (logGate)
+            {
+                logs.Add(entry);
+                if (VerbosityFilter.ShouldEmit(profile.Logging.Verbosity, severity))
+                    _log.Log(entry);
+            }
         }
 
         // Builds a journal record for this Job stamped with the standard identity + clock. Artifact
@@ -444,85 +469,116 @@ public sealed class JobEngine
                 return Failed(reason);
             }
 
-            try
+            // Per-Target distribution (Phase 4–5). Each Target's temp-write → verify → stage → promote →
+            // metadata is independent work over a distinct destination path, so M5 dispatches them with
+            // a bounded degree of parallelism (default 1 ⇒ identical sequential behavior). Correctness
+            // is unchanged: every artifact is recorded in the (thread-safe) RollbackContext as it is
+            // produced, so a failure on ANY Target rolls back EVERY Target exactly as the sequential
+            // engine did. The PathLockManager serializes any two Jobs that would touch the same final
+            // path (§5.4). `outcomeSlots` is filled positionally so per-Target order matches the Profile.
+            var outcomeSlots = new TargetOutcome?[profile.Targets.Count];
+            var stagingGate = new Lock();
+
+            // Runs one Target's distribution. Returns null on success/skip, or a failure reason on the
+            // first I/O / verification / metadata failure — mirroring the sequential engine's fail-fast.
+            string? RunTarget(int index)
             {
-                foreach (TargetSpec target in profile.Targets)
+                TargetSpec target = profile.Targets[index];
+                string dest = TargetResolver.ResolveDestination(target, distRelativePath, distFileName, layout);
+                ConflictOutcome plan = _conflictResolver.Resolve(
+                    dest, distMeta, profile.Policies.ConflictResolution);
+
+                if (plan.Action == TargetAction.Skipped)
                 {
-                    string dest = TargetResolver.ResolveDestination(target, distRelativePath, distFileName, layout);
-                    ConflictOutcome plan = _conflictResolver.Resolve(
-                        dest, distMeta, profile.Policies.ConflictResolution);
+                    Emit(LogSeverity.Skip, "SKIPPED", $"{distFileName} → {target.Path}: conflict policy skip");
+                    outcomeSlots[index] = new TargetOutcome(target.Path, null, TargetAction.Skipped);
+                    return null;
+                }
 
-                    if (plan.Action == TargetAction.Skipped)
-                    {
-                        Emit(LogSeverity.Skip, "SKIPPED", $"{distFileName} → {target.Path}: conflict policy skip");
-                        outcomes.Add(new TargetOutcome(target.Path, null, TargetAction.Skipped));
-                        continue;
-                    }
+                string finalPath = plan.FinalPath!;
 
-                    string finalPath = plan.FinalPath!;
+                // Serialize any other Job that would touch this exact final path (§5.4 same-file
+                // collision rule). The temp lives in the same directory, so locking the final path
+                // covers the temp's volume too; the source path is locked by the WorkerPool at the Job
+                // boundary. With a single shared manager this is FIFO; with the default per-engine
+                // manager and degree-1 it is a cheap uncontended acquire.
+                using IDisposable pathLock = _pathLocks.Acquire(finalPath);
 
-                    // Write the copy to a temp beside the destination and record it for rollback.
-                    string temp = AtomicFileWriter.WriteTemp(_files, distSource, finalPath);
-                    rollback.RecordTemp(temp);
+                // Write the copy to a temp beside the destination and record it for rollback.
+                string temp = AtomicFileWriter.WriteTemp(_files, distSource, finalPath);
+                rollback.RecordTemp(temp);
 
-                    // Verify the copy against the Job's final output BEFORE any rename/disposition.
-                    VerificationResult verification = verifier.Verify(distSource, temp);
-                    if (!verification.Ok)
-                    {
-                        Emit(LogSeverity.Failure, "VERIFY_FAILED",
-                            $"{distFileName} → {finalPath}: {verification.Reason}");
-                        return RollbackThenFail($"Verification failed for {finalPath}: {verification.Reason}");
-                    }
+                // Verify the copy against the Job's final output BEFORE any rename/disposition.
+                VerificationResult verification = verifier.Verify(distSource, temp);
+                if (!verification.Ok)
+                {
+                    Emit(LogSeverity.Failure, "VERIFY_FAILED",
+                        $"{distFileName} → {finalPath}: {verification.Reason}");
+                    return $"Verification failed for {finalPath}: {verification.Reason}";
+                }
 
-                    Emit(LogSeverity.Info, "VERIFIED", $"{distFileName} → {finalPath}");
+                Emit(LogSeverity.Info, "VERIFIED", $"{distFileName} → {finalPath}");
 
-                    // Journal TARGET_VERIFIED: the temp exists and was verified but is not yet promoted.
-                    // Recording its path lets recovery delete an orphaned temp left by a mid-rename crash.
-                    _journal.Record(NewRecord(JournalEventType.TargetVerified, tempPath: temp));
+                // Journal TARGET_VERIFIED: the temp exists and was verified but is not yet promoted.
+                // Recording its path lets recovery delete an orphaned temp left by a mid-rename crash.
+                _journal.Record(NewRecord(JournalEventType.TargetVerified, tempPath: temp));
 
-                    // Under StageOverwrites, move the prior version aside immediately before the rename
-                    // so rollback can restore it byte-for-byte.
-                    if (plan.Overwrite && stageOverwrites && _files.FileExists(finalPath))
+                // Under StageOverwrites, move the prior version aside immediately before the rename
+                // so rollback can restore it byte-for-byte. The staging area is created at most once
+                // across parallel Targets (guarded), then each Target stages its own prior version.
+                if (plan.Overwrite && stageOverwrites && _files.FileExists(finalPath))
+                {
+                    StagingArea area;
+                    lock (stagingGate)
                     {
                         staging ??= StagingArea.Create(_files, _stagingRoot, jobId);
-                        string stagedPath = staging.Stage(finalPath);
-                        rollback.RecordStaged(stagedPath, finalPath);
-                        Emit(LogSeverity.Info, "STAGED", $"{finalPath} → staged prior version");
-
-                        // Journal TARGET_STAGED: the prior version's staged location + restore target,
-                        // so recovery can put it back if the Job is rolled back.
-                        _journal.Record(NewRecord(
-                            JournalEventType.TargetStaged, stagedPath: stagedPath, stagedOriginalPath: finalPath));
+                        area = staging;
                     }
 
-                    // Atomic rename into place; the temp is now a fresh final to remove on rollback.
-                    AtomicFileWriter.Promote(_files, temp, finalPath, plan.Overwrite);
-                    rollback.RecordPromotion(temp, finalPath);
-                    Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {finalPath} ({plan.Action})");
+                    string stagedPath = area.Stage(finalPath);
+                    rollback.RecordStaged(stagedPath, finalPath);
+                    Emit(LogSeverity.Info, "STAGED", $"{finalPath} → staged prior version");
 
-                    // Journal TARGET_PLACED: the temp became this final. Recovery now treats the final
-                    // (not the temp) as the artifact to remove on rollback.
-                    _journal.Record(NewRecord(JournalEventType.TargetPlaced, tempPath: temp, finalPath: finalPath));
-
-                    // Best-effort metadata preservation; a FailJob-detected loss rolls back.
-                    MetadataResult metadata = _metadataCopier.Copy(
-                        distSource, finalPath, profile.Policies.MetadataOnConflict);
-                    if (!metadata.Ok)
-                    {
-                        Emit(LogSeverity.Failure, "METADATA_FAILED",
-                            $"{distFileName} → {finalPath}: {metadata.Warning}");
-                        return RollbackThenFail($"Metadata preservation failed for {finalPath}: {metadata.Warning}");
-                    }
-
-                    if (metadata.Warning is not null)
-                        Emit(LogSeverity.Info, "METADATA_WARN", $"{distFileName} → {finalPath}: {metadata.Warning}");
-
-                    outcomes.Add(new TargetOutcome(target.Path, finalPath, plan.Action));
+                    // Journal TARGET_STAGED: the prior version's staged location + restore target,
+                    // so recovery can put it back if the Job is rolled back.
+                    _journal.Record(NewRecord(
+                        JournalEventType.TargetStaged, stagedPath: stagedPath, stagedOriginalPath: finalPath));
                 }
+
+                // Atomic rename into place; the temp is now a fresh final to remove on rollback.
+                AtomicFileWriter.Promote(_files, temp, finalPath, plan.Overwrite);
+                rollback.RecordPromotion(temp, finalPath);
+                Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {finalPath} ({plan.Action})");
+
+                // Journal TARGET_PLACED: the temp became this final. Recovery now treats the final
+                // (not the temp) as the artifact to remove on rollback.
+                _journal.Record(NewRecord(JournalEventType.TargetPlaced, tempPath: temp, finalPath: finalPath));
+
+                // Best-effort metadata preservation; a FailJob-detected loss rolls back.
+                MetadataResult metadata = _metadataCopier.Copy(
+                    distSource, finalPath, profile.Policies.MetadataOnConflict);
+                if (!metadata.Ok)
+                {
+                    Emit(LogSeverity.Failure, "METADATA_FAILED",
+                        $"{distFileName} → {finalPath}: {metadata.Warning}");
+                    return $"Metadata preservation failed for {finalPath}: {metadata.Warning}";
+                }
+
+                if (metadata.Warning is not null)
+                    Emit(LogSeverity.Info, "METADATA_WARN", $"{distFileName} → {finalPath}: {metadata.Warning}");
+
+                outcomeSlots[index] = new TargetOutcome(target.Path, finalPath, plan.Action);
+                return null;
             }
-            catch (Exception ex) when (IsIoError(ex))
+
+            string? distributionFailure = RunTargets(profile.Targets.Count, RunTarget);
+            if (distributionFailure is not null)
+                return RollbackThenFail(distributionFailure);
+
+            foreach (TargetOutcome? slot in outcomeSlots)
             {
-                return RollbackThenFail($"Target distribution failed: {ex.Message}");
+                if (slot is not null)
+                    outcomes.Add(slot);
             }
 
             // Success — the staged prior versions are no longer needed.
@@ -615,6 +671,63 @@ public sealed class JobEngine
             DispositionPath = disposition.ResultPath,
             Logs = logs,
         };
+    }
+
+    /// <summary>
+    /// Drives the per-Target distribution body for indices <c>[0, count)</c>, either strictly
+    /// sequentially (<see cref="_targetParallelism"/> == 1) or with a bounded degree of parallelism.
+    /// Returns the first failure reason (lowest Target index for determinism), or null when every
+    /// Target succeeded/was skipped. An <see cref="IsIoError"/> exception thrown by any Target is
+    /// translated to a distribution-failure reason — matching the sequential engine's catch — so the
+    /// caller rolls back exactly as before; any other exception propagates (programmer/config error).
+    /// </summary>
+    private string? RunTargets(int count, Func<int, string?> runTarget)
+    {
+        if (_targetParallelism <= 1 || count <= 1)
+        {
+            // Sequential, fail-fast — byte-for-byte the M1 behavior.
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    string? failure = runTarget(i);
+                    if (failure is not null)
+                        return failure;
+                }
+                catch (Exception ex) when (IsIoError(ex))
+                {
+                    return $"Target distribution failed: {ex.Message}";
+                }
+            }
+
+            return null;
+        }
+
+        // Bounded-parallel: cap concurrency at _targetParallelism. Each Target's artifacts are recorded
+        // in the thread-safe RollbackContext as it runs, so a failure on any Target still rolls back
+        // every Target. We capture the lowest-index failure so the reported reason is deterministic
+        // regardless of completion order, then surface it to trigger the same whole-file rollback.
+        var failures = new string?[count];
+        int degree = Math.Min(_targetParallelism, count);
+        Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = degree }, i =>
+        {
+            try
+            {
+                failures[i] = runTarget(i);
+            }
+            catch (Exception ex) when (IsIoError(ex))
+            {
+                failures[i] = $"Target distribution failed: {ex.Message}";
+            }
+        });
+
+        for (int i = 0; i < count; i++)
+        {
+            if (failures[i] is { } reason)
+                return reason;
+        }
+
+        return null;
     }
 
     /// <summary>

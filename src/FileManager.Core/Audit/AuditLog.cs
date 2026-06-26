@@ -23,6 +23,10 @@ public sealed class AuditLog : IAuditLog
     private readonly Func<string, IDurableAppendWriter> _writerFactory;
     private readonly Func<DateTimeOffset> _clock;
 
+    // Serializes Record/RotateIfOversized so concurrent worker-pool Jobs (M5) cannot interleave two
+    // entries' bytes or race rotation against an active append.
+    private readonly Lock _gate = new();
+
     private IDurableAppendWriter _writer;
 
     /// <summary>The resolved audit file path.</summary>
@@ -61,12 +65,15 @@ public sealed class AuditLog : IAuditLog
 
     public void Record(AuditEntry entry)
     {
-        RotateIfOversized();
         string json = ProfileSerializer.Serialize(entry);
         // One entry per line keeps the trail greppable; the line delimiter is part of the frame.
         byte[] line = Encoding.UTF8.GetBytes(json + "\n");
-        _writer.Append(line);
-        _writer.Flush(); // fsync per entry — a recorded deletion survives a crash (§7).
+        lock (_gate)
+        {
+            RotateIfOversized();
+            _writer.Append(line);
+            _writer.Flush(); // fsync per entry — a recorded deletion survives a crash (§7).
+        }
     }
 
     private void RotateIfOversized()
@@ -102,5 +109,9 @@ public sealed class AuditLog : IAuditLog
         }
     }
 
-    public void Dispose() => _writer.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+            _writer.Dispose();
+    }
 }

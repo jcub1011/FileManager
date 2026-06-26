@@ -99,12 +99,75 @@ public sealed class ProfileValidationTests
     }
 
     [Fact]
-    public void EnabledSchedule_WithoutCron_IsInvalid()
+    public void EnabledSchedule_WithoutCronOrInterval_IsInvalid()
+    {
+        // M5: an enabled schedule must set exactly one of Cron / IntervalSeconds; neither is invalid.
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var schedule = (JsonObject)((JsonObject)doc["Triggers"]!)["Schedule"]!;
+        schedule["Enabled"] = true;
+        schedule["Cron"] = null;
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("Schedule"));
+    }
+
+    [Fact]
+    public void EnabledSchedule_WithBothCronAndInterval_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var schedule = (JsonObject)((JsonObject)doc["Triggers"]!)["Schedule"]!;
+        schedule["Enabled"] = true;
+        schedule["Cron"] = "0 * * * *";
+        schedule["IntervalSeconds"] = 60;
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("Schedule"));
+    }
+
+    [Fact]
+    public void EnabledSchedule_WithValidInterval_IsValid()
     {
         JsonObject doc = TestSamples.ParseProfileSample();
         var schedule = (JsonObject)((JsonObject)doc["Triggers"]!)["Schedule"]!;
         schedule["Enabled"] = true;
         schedule["Cron"] = null;
+        schedule["IntervalSeconds"] = 300;
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.True(result.IsValid, string.Join("|", result.Errors));
+    }
+
+    [Fact]
+    public void EnabledSchedule_WithNonPositiveInterval_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var schedule = (JsonObject)((JsonObject)doc["Triggers"]!)["Schedule"]!;
+        schedule["Enabled"] = true;
+        schedule["Cron"] = null;
+        schedule["IntervalSeconds"] = 0;
+
+        Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
+        ValidationResult result = ProfileValidator.Validate(profile);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path.Contains("IntervalSeconds"));
+    }
+
+    [Fact]
+    public void EnabledSchedule_WithMalformedCron_IsInvalid()
+    {
+        JsonObject doc = TestSamples.ParseProfileSample();
+        var schedule = (JsonObject)((JsonObject)doc["Triggers"]!)["Schedule"]!;
+        schedule["Enabled"] = true;
+        schedule["Cron"] = "this is not cron";
 
         Profile profile = ProfileSerializer.Deserialize(doc.ToJsonString())!;
         ValidationResult result = ProfileValidator.Validate(profile);

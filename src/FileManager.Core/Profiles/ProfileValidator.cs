@@ -123,11 +123,35 @@ public static class ProfileValidator
     private static void ValidateSchedule(Profile profile, List<ValidationError> errors)
     {
         var schedule = profile.Triggers.Schedule;
-        if (schedule is { Enabled: true } && string.IsNullOrWhiteSpace(schedule.Cron))
+        if (schedule is not { Enabled: true })
+            return;
+
+        string schedulePath = $"{nameof(Profile.Triggers)}.{nameof(TriggerSet.Schedule)}";
+        bool hasCron = !string.IsNullOrWhiteSpace(schedule.Cron);
+        bool hasInterval = schedule.IntervalSeconds is not null;
+
+        // Schema extension (M5): exactly one of Cron / IntervalSeconds must be set when the schedule
+        // trigger is enabled. Neither (or both) is a configuration error.
+        if (hasCron == hasInterval)
         {
             errors.Add(new ValidationError(
-                $"{nameof(Profile.Triggers)}.{nameof(TriggerSet.Schedule)}.{nameof(ScheduleTrigger.Cron)}",
-                "Cron is required when the Schedule trigger is enabled."));
+                schedulePath,
+                "Exactly one of Cron or IntervalSeconds must be set when the Schedule trigger is enabled."));
+            return;
+        }
+
+        if (hasCron && !Triggers.Schedule.CronExpression.TryParse(schedule.Cron, out _, out string? cronError))
+        {
+            errors.Add(new ValidationError(
+                $"{schedulePath}.{nameof(ScheduleTrigger.Cron)}",
+                $"Invalid cron expression: {cronError}"));
+        }
+
+        if (hasInterval && schedule.IntervalSeconds <= 0)
+        {
+            errors.Add(new ValidationError(
+                $"{schedulePath}.{nameof(ScheduleTrigger.IntervalSeconds)}",
+                "IntervalSeconds must be a positive integer."));
         }
     }
 

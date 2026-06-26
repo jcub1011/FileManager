@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FileManager.Core.Configuration;
+using FileManager.Core.State;
 
 namespace FileManager.Core.Profiles;
 
@@ -16,6 +17,7 @@ namespace FileManager.Core.Profiles;
     GenerationMode = JsonSourceGenerationMode.Default)]
 [JsonSerializable(typeof(Profile))]
 [JsonSerializable(typeof(ServiceConfig))]
+[JsonSerializable(typeof(LastRunState))]
 public partial class ProfileJsonContext : JsonSerializerContext
 {
 }

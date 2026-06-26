@@ -57,6 +57,11 @@ dotnet build FileManager.slnx -c Release   # what CI runs
 - A **Profile** (`Profiles/Profile.cs`) is one JSON file under the config dir's `profiles/` folder.
   Property names are PascalCase to match the on-disk schema (spec §5.1) exactly. Enum values are the
   authoritative names from §5.1 (`Profiles/Enums.cs`).
+- **Schema extension (M5):** `ScheduleTrigger` (`Profiles/TriggerSet.cs`) gained an optional
+  `IntervalSeconds` (`int?`, PascalCase) alongside `Cron` — the spec (§3.2) allows a fixed interval as
+  well as a cron expression. When `Schedule.Enabled` is true, `ProfileValidator` requires **exactly one
+  of** `Cron` / `IntervalSeconds` (and that the cron parses / the interval is positive). It is part of
+  `Profile`, already source-gen registered, so no JSON-context change was needed.
 - `ConfigPaths` resolves the per-OS config directory: Windows `%APPDATA%\FileManager\`; Linux
   `$XDG_CONFIG_HOME/filemanager/` (fallback `~/.config/filemanager/`).
 - `ServiceConfig` (`config.json`, sibling to `profiles/`) holds service-scoped settings —
@@ -90,3 +95,41 @@ wraps `FileMode.Append` + `Flush(flushToDisk:true)`. Journal/audit JSON uses the
 `DurableJsonContext` source-gen root (no reflection). `JobEngine` takes optional `IJournal`/`IAuditLog`
 (default `NullJournal`/`NullAuditLog`); `RecoveryService.Recover()` cleans pre-placement Jobs and rolls
 back mid-placement ones, and **never disposes a source unless `AllTargetsVerified` was journaled**.
+`FileJournal`/`AuditLog` are now concurrency-safe under the M5 worker pool (a single lock guards each
+writer's append+fsync and the journal's read/compaction).
+
+## Triggers & concurrency (M5)
+
+Automated, parallel, hands-off execution. All reflection-free / dependency-free / AOT-clean.
+
+- **`Execution/`** — the single authoritative execution model (§5.4). `PathLockManager`: in-process
+  FIFO lock keyed by **normalized** absolute path; `Acquire`/`AcquireAsync` take a whole key-set in
+  one shot **sorted canonically** so crossing key-sets can't deadlock; in-process only (not a
+  cross-machine mutex — SMB/NFS caveat). `JobQueue`: bounded `System.Threading.Channels` queue of
+  `JobRequest` (backpressure when full; `Complete()` seals it). `WorkerPool`: exactly `MaxWorkers`
+  consumer loops ⇒ concurrency bound is structural; acquires each Job's **source** path lock before
+  the handler; `DrainAsync` (graceful) / `StopAsync` (cancel).
+- **Intra-Job Target parallelism** — `JobEngine` takes optional `PathLockManager` + `targetParallelism`
+  (default 1 ⇒ byte-for-byte the M1 sequential behavior). >1 dispatches the per-Target write/verify/
+  stage/promote loop bounded-parallel via `Parallel.For`, each Target locking its **final** path.
+  `RollbackContext` is now thread-safe (lock-guarded; snapshot copies on read), so a failure on any
+  Target still rolls back **every** Target identically; the disposition invariant is unchanged.
+- **`Triggers/Schedule/`** — `CronExpression` (hand-rolled 5-field: `*`, `*/step`, `a-b`, `a,b`,
+  `a-b/step`; numbers only; Vixie DOM/DOW OR-semantics; `TryParse`/`NextOccurrence`). `ScheduleDefinition`
+  wraps cron **or** interval. `MissedRunEvaluator` (pure, clock-injected): `CatchUpOnce` ⇒ one coalesced
+  run when ≥1 window elapsed in `(lastRun, now]`, else none; `Skip` ⇒ none. `Scheduler` resolves the
+  IANA timezone (unknown ⇒ **logged** fallback to local, never a crash), persists last-run, fires due
+  runs via a host callback. Clock is `TimeProvider` (built-in, AOT-safe).
+- **`Triggers/Watcher/`** — `ReadinessProbe` (§3.2.1 part (b)): Windows exclusive-open; Linux
+  not-advisory-locked + two-sample size stability; network (UNC / non-fixed drive) relaxes to
+  size-stability + logged caveat — all behind the `IReadinessFileProbe` seam. `SourceWatcher` debounces
+  per file on `SettleDelaySeconds` (settle = part (a), owned here), drives a deterministic `Tick(now)`
+  pump, emits ready paths; `ISourceFileWatcher` seams `FileSystemWatcher` so tests feed synthetic
+  events. `WatcherScaleManager` + `RescanFallback`: a buffer-overflow / inotify-limit `Error` → bounded
+  rescan of the **one** affected root, re-offering files missed during the gap.
+- **`State/LastRunStore`** — per-Profile last-run timestamps in `<config>/schedule-state.json`
+  (`LastRunState` registered in `ProfileJsonContext`). Validation-not-exceptions: absent/corrupt ⇒ "no
+  recorded runs". `FromConfig(...)`.
+
+Determinism rule for M5 tests: inject `TimeProvider` (or the watcher/probe seams); **no real wall-clock
+sleeps or real filesystem events** in unit tests.
