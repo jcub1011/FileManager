@@ -18,6 +18,18 @@ public sealed record TokenContext
     /// <summary>Absolute path of the Source directory that contained this file.</summary>
     public required string SourceRootPath { get; init; }
 
+    /// <summary>
+    /// Absolute path of the file entering the active transformer step (<c>$step_input_path</c>),
+    /// or null outside a step context. Set per step by <see cref="FileManager.Core.Transformers"/>.
+    /// </summary>
+    public string? StepInputPath { get; init; }
+
+    /// <summary>
+    /// Absolute path the active <see cref="Profiles.OutputMode.NewFile"/> step must write to
+    /// (<c>$step_output_path</c>), or null for in-place / non-step contexts.
+    /// </summary>
+    public string? StepOutputPath { get; init; }
+
     /// <summary>Full base name: <see cref="FilenameStem"/> + <see cref="Extension"/>.</summary>
     public string FilenameCurrent => FilenameStem + Extension;
 
@@ -121,6 +133,14 @@ public static class TokenExpander
                 return true;
             case "source_root_path":
                 value = context.SourceRootPath;
+                return true;
+            // Step tokens resolve only inside a transformer step; outside one the context fields are
+            // null and the token is left verbatim (unknown), so M1 distribution is unaffected.
+            case "step_input_path" when context.StepInputPath is not null:
+                value = context.StepInputPath;
+                return true;
+            case "step_output_path" when context.StepOutputPath is not null:
+                value = context.StepOutputPath;
                 return true;
             default:
                 value = null;
