@@ -77,6 +77,8 @@ public sealed class JobEngineRollbackTests : IDisposable
             verifier,
             new MetadataCopier(files),
             new RollbackEngine(files),
+            FakeFreeSpaceProbe.Unconstrained(),
+            new SpaceReservationLedger(FakeFreeSpaceProbe.Unconstrained()),
             new JobEngineOptions
             {
                 TrashDirectory = _temp.Path("trash"),

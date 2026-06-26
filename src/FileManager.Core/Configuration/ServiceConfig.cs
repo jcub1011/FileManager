@@ -55,4 +55,14 @@ public sealed record ServiceConfig
 
     /// <summary>Rotate the audit trail when it reaches this many bytes.</summary>
     public long AuditRotationSizeBytes { get; init; } = DefaultAuditRotationSizeBytes;
+
+    /// <summary>
+    /// Headroom (in bytes) the proactive disk-space checks keep free on every volume: a Target write
+    /// or trash move is refused unless <c>available - reserved - margin</c> still covers it (§3.3
+    /// data-safety). Defaults to <c>0</c> so the engine refuses only when a volume genuinely cannot fit
+    /// the bytes — a non-zero margin is strictly opt-in, avoiding surprising failures on volumes that
+    /// merely run close to full. Threaded into the engine's <see cref="SpaceReservationLedger"/> and
+    /// the trash free-space checks.
+    /// </summary>
+    public long MinFreeSpaceMarginBytes { get; init; }
 }

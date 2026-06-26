@@ -20,11 +20,15 @@ namespace FileManager.Core.Trash;
 public sealed class LinuxTrash : ITrashService
 {
     private readonly IFileOperations _files;
+    private readonly IFreeSpaceProbe _freeSpace;
+    private readonly long _marginBytes;
     private readonly string _trashRoot;
 
-    public LinuxTrash(IFileOperations files, string? trashRoot = null)
+    public LinuxTrash(IFileOperations files, IFreeSpaceProbe freeSpace, string? trashRoot = null, long marginBytes = 0)
     {
         _files = files;
+        _freeSpace = freeSpace;
+        _marginBytes = marginBytes;
         _trashRoot = trashRoot ?? DefaultTrashRoot();
     }
 
@@ -45,6 +49,17 @@ public sealed class LinuxTrash : ITrashService
             string original = Path.GetFullPath(path);
             string filesDir = Path.Combine(_trashRoot, "files");
             string infoDir = Path.Combine(_trashRoot, "info");
+
+            // Proactive free-space check against the trash destination volume (<trashRoot>). A
+            // cross-volume move into the home trash copies bytes, so a full trash volume fails the
+            // move; catch it up front. Trash moves are terminal and quick, so this is a direct probe
+            // check rather than ledger-accounted.
+            long size = _files.GetMetadata(original).Length;
+            long available = _freeSpace.Probe(_trashRoot).AvailableBytes;
+            long usable = available == long.MaxValue ? long.MaxValue : Math.Max(0L, available - _marginBytes);
+            if (size > usable)
+                return TrashResult.Failure($"insufficient space on trash volume {_trashRoot} (need {size}, available {usable}).");
+
             _files.CreateDirectory(filesDir);
             _files.CreateDirectory(infoDir);
 

@@ -1,5 +1,6 @@
 using System.IO;
 using FileManager.Core.Configuration;
+using FileManager.Core.Safety;
 
 namespace FileManager.Core.Jobs;
 
@@ -38,4 +39,12 @@ public sealed record JobEngineOptions
     /// <summary>The effective staging root (explicit override, else <c>&lt;config&gt;/staging</c>).</summary>
     public string ResolveStagingRoot() =>
         StagingRoot ?? Path.Combine(ConfigPaths.GetConfigDirectory(), "staging");
+
+    /// <summary>
+    /// Headroom (in bytes) the proactive disk-space checks keep free on every volume; mirrors
+    /// <see cref="ServiceConfig.MinFreeSpaceMarginBytes"/>. Threaded into the
+    /// <see cref="SpaceReservationLedger"/> and trash free-space checks the convenience constructor
+    /// builds. Defaults to <c>0</c> (refuse only when a volume genuinely cannot fit the bytes).
+    /// </summary>
+    public long MinFreeSpaceMarginBytes { get; init; }
 }

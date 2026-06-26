@@ -106,6 +106,38 @@ public sealed class ServiceConfigTests
     }
 
     [Fact]
+    public void MinFreeSpaceMarginBytes_DefaultsToZero_AndRoundTrips()
+    {
+        Assert.Equal(0, new ServiceConfig().MinFreeSpaceMarginBytes);
+
+        var original = new ServiceConfig { MinFreeSpaceMarginBytes = 5_000_000 };
+        string json = ProfileSerializer.Serialize(original);
+        ServiceConfig? roundTripped = ProfileSerializer.DeserializeServiceConfig(json);
+
+        Assert.NotNull(roundTripped);
+        Assert.Equal(5_000_000, roundTripped!.MinFreeSpaceMarginBytes);
+    }
+
+    [Fact]
+    public void LoadFrom_NegativeMinFreeSpaceMargin_ReportsValidationError()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "fp-config-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, """{ "MinFreeSpaceMarginBytes": -1 }""");
+
+        try
+        {
+            ServiceConfigLoadResult result = ServiceConfigStore.LoadFrom(path);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(result.Validation.Errors, e => e.Path == nameof(ServiceConfig.MinFreeSpaceMarginBytes));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void LoadFrom_InvalidMaxWorkers_ReportsValidationError()
     {
         string path = Path.Combine(Path.GetTempPath(), "fp-config-" + Guid.NewGuid().ToString("N") + ".json");

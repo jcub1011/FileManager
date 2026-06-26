@@ -19,7 +19,7 @@ namespace FileManager.Core.Trash;
 /// <see cref="OperatingSystem.IsWindows"/> at the call site (<see cref="TrashServiceFactory"/>).
 /// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed partial class WindowsRecycleBin(IFileOperations files) : ITrashService
+public sealed partial class WindowsRecycleBin(IFileOperations files, IFreeSpaceProbe freeSpace, long marginBytes = 0) : ITrashService
 {
     // FOF_* / FOFX_* operation flags (shellapi.h): silent, no UI, allow undo (Recycle Bin),
     // no confirmation, no error UI, suppress all dialogs.
@@ -44,6 +44,16 @@ public sealed partial class WindowsRecycleBin(IFileOperations files) : ITrashSer
             return TrashResult.Failure($"File not found: {path}");
 
         string full = Path.GetFullPath(path);
+
+        // Proactive free-space check. A Recycle Bin move is same-volume (a rename), so this only
+        // catches a genuinely full source volume; the per-drive Recycle Bin quota is still caught
+        // reactively by GetAnyOperationsAborted below. Trash moves are terminal and quick, so they are
+        // a direct probe check rather than ledger-accounted.
+        long size = files.GetMetadata(full).Length;
+        long available = freeSpace.Probe(full).AvailableBytes;
+        long usable = available == long.MaxValue ? long.MaxValue : Math.Max(0L, available - marginBytes);
+        if (size > usable)
+            return TrashResult.Failure($"insufficient space on trash volume for {full} (need {size}, available {usable}).");
         object? comObject = null;
         try
         {

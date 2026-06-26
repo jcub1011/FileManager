@@ -43,6 +43,8 @@ public sealed class JobEngineSeamTests : IDisposable
             verifier: null,
             new MetadataCopier(_files),
             new RollbackEngine(_files),
+            FakeFreeSpaceProbe.Unconstrained(),
+            new SpaceReservationLedger(FakeFreeSpaceProbe.Unconstrained()),
             new JobEngineOptions
             {
                 TrashDirectory = _temp.Path("trash"),

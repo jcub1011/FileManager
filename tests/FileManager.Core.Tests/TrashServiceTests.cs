@@ -17,7 +17,7 @@ public sealed class TrashServiceTests : IDisposable
     {
         string trashRoot = _temp.Path("Trash");
         string src = _temp.WriteFile("docs/report.txt", "recoverable content");
-        var trash = new LinuxTrash(_files, trashRoot);
+        var trash = new LinuxTrash(_files, FakeFreeSpaceProbe.Unconstrained(), trashRoot);
 
         TrashResult r = trash.MoveToTrash(src);
 
@@ -42,7 +42,7 @@ public sealed class TrashServiceTests : IDisposable
     public void LinuxTrash_HandlesNameCollisionsAcrossFilesAndInfo()
     {
         string trashRoot = _temp.Path("Trash");
-        var trash = new LinuxTrash(_files, trashRoot);
+        var trash = new LinuxTrash(_files, FakeFreeSpaceProbe.Unconstrained(), trashRoot);
 
         string first = _temp.WriteFile("a/note.txt", "first");
         string second = _temp.WriteFile("b/note.txt", "second");
@@ -72,7 +72,7 @@ public sealed class TrashServiceTests : IDisposable
     {
         string trashRoot = _temp.Path("local-trash");
         string src = _temp.WriteFile("x/data.bin", "bytes");
-        var trash = new LocalFolderTrash(_files, trashRoot);
+        var trash = new LocalFolderTrash(_files, FakeFreeSpaceProbe.Unconstrained(), trashRoot);
 
         TrashResult r = trash.MoveToTrash(src);
 
@@ -81,5 +81,39 @@ public sealed class TrashServiceTests : IDisposable
         Assert.NotNull(r.TrashedPath);
         Assert.True(File.Exists(r.TrashedPath!));
         Assert.Equal("bytes", File.ReadAllText(r.TrashedPath!));
+    }
+
+    [Fact]
+    public void LinuxTrash_FullTrashVolume_Fails_FileUntouched()
+    {
+        string trashRoot = _temp.Path("Trash");
+        string src = _temp.WriteFile("docs/report.txt", "recoverable content");
+        // The trash volume reports 0 free → the proactive check refuses before any move.
+        var probe = new FakeFreeSpaceProbe(new Dictionary<string, long> { [trashRoot] = 0 });
+        var trash = new LinuxTrash(_files, probe, trashRoot);
+
+        TrashResult r = trash.MoveToTrash(src);
+
+        Assert.False(r.Ok);
+        Assert.Contains("insufficient space", r.Reason);
+        // The real file is untouched.
+        Assert.True(File.Exists(src));
+        Assert.Equal("recoverable content", File.ReadAllText(src));
+    }
+
+    [Fact]
+    public void LocalFolderTrash_FullTrashVolume_Fails_FileUntouched()
+    {
+        string trashRoot = _temp.Path("local-trash");
+        string src = _temp.WriteFile("x/data.bin", "bytes");
+        var probe = new FakeFreeSpaceProbe(new Dictionary<string, long> { [trashRoot] = 0 });
+        var trash = new LocalFolderTrash(_files, probe, trashRoot);
+
+        TrashResult r = trash.MoveToTrash(src);
+
+        Assert.False(r.Ok);
+        Assert.Contains("insufficient space", r.Reason);
+        Assert.True(File.Exists(src));
+        Assert.Equal("bytes", File.ReadAllText(src));
     }
 }

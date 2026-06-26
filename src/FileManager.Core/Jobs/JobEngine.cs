@@ -30,6 +30,8 @@ public sealed class JobEngine
     private readonly IVerifier? _verifier;
     private readonly MetadataCopier _metadataCopier;
     private readonly RollbackEngine _rollbackEngine;
+    private readonly IFreeSpaceProbe _freeSpace;
+    private readonly SpaceReservationLedger _ledger;
     private readonly string _trashDirectory;
     private readonly string _pipelineTempRoot;
     private readonly string _stagingRoot;
@@ -55,6 +57,8 @@ public sealed class JobEngine
         IVerifier? verifier,
         MetadataCopier metadataCopier,
         RollbackEngine rollbackEngine,
+        IFreeSpaceProbe freeSpace,
+        SpaceReservationLedger ledger,
         JobEngineOptions? options = null)
     {
         _files = files;
@@ -66,6 +70,8 @@ public sealed class JobEngine
         _verifier = verifier;
         _metadataCopier = metadataCopier;
         _rollbackEngine = rollbackEngine;
+        _freeSpace = freeSpace;
+        _ledger = ledger;
         JobEngineOptions effective = options ?? new JobEngineOptions();
         _trashDirectory = effective.ResolveTrashDirectory();
         _pipelineTempRoot = effective.ResolvePipelineTempRoot();
@@ -79,18 +85,39 @@ public sealed class JobEngine
     /// <see cref="VerificationMethod"/> (null verifier ⇒ <see cref="ProcessFile"/> chooses), and the
     /// native platform trash is wired into source disposition.
     /// </summary>
+    /// <remarks>
+    /// Builds a <see cref="SystemFreeSpaceProbe"/> and a <b>per-engine</b>
+    /// <see cref="SpaceReservationLedger"/> seeded with
+    /// <see cref="JobEngineOptions.MinFreeSpaceMarginBytes"/>. A per-engine ledger is correct for
+    /// today's single-threaded engine (every Job reserves then releases before the next runs). M5/M6
+    /// will instead inject one <b>shared</b> ledger (via the full constructor) across the worker pool,
+    /// so concurrent Jobs writing to the same volume see each other's outstanding reservations.
+    /// </remarks>
     public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
+        : this(files, log, processRunner, options ?? new JobEngineOptions())
+    {
+    }
+
+    // Resolves the standard collaborators against a single, already-resolved JobEngineOptions instance
+    // (so the defaults aren't reallocated and every collaborator sees the same options).
+    private JobEngine(IFileOperations files, ILogSink log, IProcessRunner? processRunner, JobEngineOptions effective)
         : this(
             files,
             log,
             new FilterEvaluator(new DedupeIndex(files)),
             new TransformerRunner(files, processRunner ?? new SystemProcessRunner()),
             new ConflictResolver(files),
-            new SourceDisposer(files, TrashServiceFactory.Create(files, (options ?? new JobEngineOptions()).ResolveTrashDirectory())),
+            new SourceDisposer(files, TrashServiceFactory.Create(
+                files,
+                effective.ResolveTrashDirectory(),
+                freeSpace: null,
+                effective.MinFreeSpaceMarginBytes)),
             verifier: null,
             new MetadataCopier(files),
             new RollbackEngine(files),
-            options)
+            new SystemFreeSpaceProbe(),
+            new SpaceReservationLedger(new SystemFreeSpaceProbe(), effective.MinFreeSpaceMarginBytes),
+            effective)
     {
     }
 
@@ -210,6 +237,7 @@ public sealed class JobEngine
         var outcomes = new List<TargetOutcome>();
         TempWorkspace? workspace = null;
         StagingArea? staging = null;
+        SpaceReservation? reservation = null;
         var rollback = new RollbackContext();
 
         // Set when a rollback cannot restore every staged prior version: those originals are still
@@ -264,6 +292,52 @@ public sealed class JobEngine
             // or a FailJob metadata loss) rolls back every Target for this file and leaves the source
             // untouched (§3.3). On success the staged originals are discarded.
             TargetLayout layout = TargetResolver.ResolveLayout(profile);
+
+            // Pre-flight reservation (§3.3 proactive disk-space): reserve the bytes every Target write
+            // (and any cross-volume staging move) will consume BEFORE writing a single byte, so a
+            // doomed Job fails fast leaving the source untouched and the Targets clean. Runs here —
+            // after Phase 3 so distMeta.Length reflects any transform, and before the distribution loop.
+            // Transformer scratch space is deliberately NOT reserved: a transform's intermediate/output
+            // sizes are unknowable up front, so the reactive rollback still covers a mid-transform ENOSPC.
+            var spaceRequests = new List<SpaceRequest>();
+            string stagingRootDir = _stagingRoot;
+            string? stagingVolume = null; // resolved lazily only when a staging move would be cross-volume
+
+            // Staging only ever fires when the conflict policy can replace an existing Target in place
+            // (Overwrite / OverwriteIfNewer → plan.Overwrite). RenameSuffix/Skip route to a fresh name
+            // and never stage, so gating here avoids reserving staging space the run will never use.
+            bool policyCanOverwrite = profile.Policies.ConflictResolution
+                is ConflictResolution.Overwrite or ConflictResolution.OverwriteIfNewer;
+            foreach (TargetSpec target in profile.Targets)
+            {
+                string dest = TargetResolver.ResolveDestination(target, distRelativePath, distFileName, layout);
+                // Probe the destination's directory (its volume) — the file itself does not exist yet.
+                string destDir = Path.GetDirectoryName(dest) ?? target.Path;
+                spaceRequests.Add(new SpaceRequest(destDir, distMeta.Length));
+
+                // StageOverwrites moves an existing prior version aside before the rename. A same-volume
+                // move is a rename (no extra space); only a cross-volume staging move copies bytes, so
+                // reserve the prior file's size on the staging volume in that case.
+                if (stageOverwrites && policyCanOverwrite && _files.FileExists(dest))
+                {
+                    string targetVolume = _freeSpace.Probe(destDir).VolumeKey;
+                    stagingVolume ??= _freeSpace.Probe(stagingRootDir).VolumeKey;
+                    if (!string.Equals(stagingVolume, targetVolume, PathNormalizer.Comparison))
+                    {
+                        long priorSize = _files.GetMetadata(dest).Length;
+                        spaceRequests.Add(new SpaceRequest(stagingRootDir, priorSize));
+                    }
+                }
+            }
+
+            ReservationResult spaceResult = _ledger.TryReserve(spaceRequests);
+            if (!spaceResult.Ok)
+            {
+                Emit(LogSeverity.Failure, "NO_SPACE", $"{distFileName}: insufficient space: {spaceResult.Reason}");
+                return Failed($"Insufficient space: {spaceResult.Reason}");
+            }
+
+            reservation = spaceResult.Handle;
 
             // RollbackThenFail runs the §3.3 rollback, logs it, and returns the Failed result.
             JobResult RollbackThenFail(string reason)
@@ -365,6 +439,10 @@ public sealed class JobEngine
             workspace?.Dispose();
             if (!preserveStaging)
                 staging?.Dispose();
+            // Release the pre-flight space reservation (idempotent) so the next Job sees the freed
+            // bytes. Today's single-threaded engine reserves→releases per Job; a shared ledger (M5/M6)
+            // makes this release visible to other workers.
+            reservation?.Dispose();
         }
 
         // Phase 6 — Source disposition. Only dispose of the source when at least one Target was

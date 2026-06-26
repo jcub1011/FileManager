@@ -26,7 +26,7 @@ public sealed class MirrorPlannerTests : IDisposable
         _temp.WriteFile("T/keep.txt", "k");          // matches source key
         string surplus = _temp.WriteFile("T/orphan.txt", "o"); // absent from source ⇒ surplus
 
-        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, _temp.Path("trash")));
+        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, FakeFreeSpaceProbe.Unconstrained(), _temp.Path("trash")));
         MirrorPlan plan = planner.Plan(MirrorProfile(new[] { s }, new[] { t }, TargetLayout.PreserveStructure));
 
         Assert.Single(plan.Surplus);
@@ -43,7 +43,7 @@ public sealed class MirrorPlannerTests : IDisposable
         string surplus = _temp.WriteFile("T/surplus.txt", "save me");
 
         string trashRoot = _temp.Path("Trash");
-        var planner = new MirrorPlanner(_files, new LinuxTrash(_files, trashRoot));
+        var planner = new MirrorPlanner(_files, new LinuxTrash(_files, FakeFreeSpaceProbe.Unconstrained(), trashRoot));
 
         MirrorExecution exec = planner.Reconcile(
             MirrorProfile(new[] { s }, new[] { t }, TargetLayout.PreserveStructure));
@@ -72,7 +72,7 @@ public sealed class MirrorPlannerTests : IDisposable
         _temp.WriteFile("T/b.txt", "b");           // matches S2 flattened
         string surplus = _temp.WriteFile("T/c.txt", "c"); // absent from both sources
 
-        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, _temp.Path("trash")));
+        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, FakeFreeSpaceProbe.Unconstrained(), _temp.Path("trash")));
         MirrorPlan plan = planner.Plan(MirrorProfile(new[] { s1, s2 }, new[] { t }, TargetLayout.PreserveStructure));
 
         Assert.Single(plan.Surplus);
@@ -89,7 +89,7 @@ public sealed class MirrorPlannerTests : IDisposable
         // An orphaned atomic-write temp must not be reported as surplus.
         _temp.WriteFile("T/." + Guid.NewGuid().ToString("N") + AtomicFileWriter.TempSuffix, "junk");
 
-        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, _temp.Path("trash")));
+        var planner = new MirrorPlanner(_files, new LocalFolderTrash(_files, FakeFreeSpaceProbe.Unconstrained(), _temp.Path("trash")));
         MirrorPlan plan = planner.Plan(MirrorProfile(new[] { s }, new[] { t }, TargetLayout.PreserveStructure));
 
         Assert.Empty(plan.Surplus);

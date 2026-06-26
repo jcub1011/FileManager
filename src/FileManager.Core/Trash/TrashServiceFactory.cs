@@ -11,15 +11,24 @@ public static class TrashServiceFactory
 {
     /// <summary>
     /// Builds the native trash service for the current OS, falling back to a
-    /// <see cref="LocalFolderTrash"/> rooted at <paramref name="fallbackRoot"/>.
+    /// <see cref="LocalFolderTrash"/> rooted at <paramref name="fallbackRoot"/>. Each implementation
+    /// gets an <see cref="IFreeSpaceProbe"/> (a <see cref="SystemFreeSpaceProbe"/> when
+    /// <paramref name="freeSpace"/> is null) and the <paramref name="marginBytes"/> headroom for its
+    /// proactive trash-volume free-space check.
     /// </summary>
-    public static ITrashService Create(IFileOperations files, string fallbackRoot)
+    public static ITrashService Create(
+        IFileOperations files,
+        string fallbackRoot,
+        IFreeSpaceProbe? freeSpace = null,
+        long marginBytes = 0)
     {
-        if (OperatingSystem.IsWindows())
-            return new WindowsRecycleBin(files);
-        if (OperatingSystem.IsLinux())
-            return new LinuxTrash(files);
+        IFreeSpaceProbe probe = freeSpace ?? new SystemFreeSpaceProbe();
 
-        return new LocalFolderTrash(files, fallbackRoot);
+        if (OperatingSystem.IsWindows())
+            return new WindowsRecycleBin(files, probe, marginBytes);
+        if (OperatingSystem.IsLinux())
+            return new LinuxTrash(files, probe, trashRoot: null, marginBytes);
+
+        return new LocalFolderTrash(files, probe, fallbackRoot, marginBytes);
     }
 }
