@@ -4,9 +4,12 @@ using FileManager.Core.Filtering;
 using FileManager.Core.IO;
 using FileManager.Core.Jobs;
 using FileManager.Core.Logging;
+using FileManager.Core.Metadata;
 using FileManager.Core.Profiles;
 using FileManager.Core.Routing;
+using FileManager.Core.Safety;
 using FileManager.Core.Transformers;
+using FileManager.Core.Verification;
 using Xunit;
 
 namespace FileManager.Core.Tests;
@@ -37,7 +40,15 @@ public sealed class JobEngineSeamTests : IDisposable
             new TransformerRunner(_files, new FakeProcessRunner(_ => throw new InvalidOperationException("no steps"))),
             conflictResolver ?? new ConflictResolver(_files),
             new SourceDisposer(_files),
-            new JobEngineOptions { TrashDirectory = _temp.Path("trash"), PipelineTempRoot = _temp.Path("pipe") });
+            verifier: null,
+            new MetadataCopier(_files),
+            new RollbackEngine(_files),
+            new JobEngineOptions
+            {
+                TrashDirectory = _temp.Path("trash"),
+                PipelineTempRoot = _temp.Path("pipe"),
+                StagingRoot = _temp.Path("staging"),
+            });
 
     /// <summary>A filter evaluator that rejects everything with a fixed deciding-filter name.</summary>
     private sealed class RejectAllEvaluator : IFilterEvaluator

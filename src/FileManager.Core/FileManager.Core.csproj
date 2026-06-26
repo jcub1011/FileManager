@@ -2,6 +2,12 @@
 
   <PropertyGroup>
     <RootNamespace>FileManager.Core</RootNamespace>
+    <!--
+      Source-generated COM ([GeneratedComInterface]) and P/Invoke ([LibraryImport]) marshalling
+      stubs (used by the AOT-safe Windows IFileOperation Recycle Bin interop) emit unsafe code.
+      This is the trim/AOT-friendly interop path; the unsafe is confined to generated marshalling.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--

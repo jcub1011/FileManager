@@ -3,16 +3,21 @@ using FileManager.Core.Disposition;
 using FileManager.Core.Filtering;
 using FileManager.Core.IO;
 using FileManager.Core.Logging;
+using FileManager.Core.Metadata;
 using FileManager.Core.Profiles;
 using FileManager.Core.Routing;
+using FileManager.Core.Safety;
 using FileManager.Core.Transformers;
+using FileManager.Core.Trash;
+using FileManager.Core.Verification;
 
 namespace FileManager.Core.Jobs;
 
 /// <summary>
 /// Runs the single-file Job lifecycle (§4) synchronously: ingest → screen → transform → distribute →
-/// dispose. Real verification/rollback (M3), journaling (M4), and concurrency/triggers (M5) are out
-/// of scope; <see cref="ProcessFile"/> is the programmatic entrypoint that later triggers call.
+/// verify → dispose, with in-process rollback across all Targets on failure (§3.3). Durable
+/// journaling (M4) and concurrency/triggers (M5) remain out of scope; <see cref="ProcessFile"/> is the
+/// programmatic entrypoint that later triggers call.
 /// </summary>
 public sealed class JobEngine
 {
@@ -22,14 +27,24 @@ public sealed class JobEngine
     private readonly ITransformerRunner _transformerRunner;
     private readonly IConflictResolver _conflictResolver;
     private readonly ISourceDisposer _sourceDisposer;
+    private readonly IVerifier? _verifier;
+    private readonly MetadataCopier _metadataCopier;
+    private readonly RollbackEngine _rollbackEngine;
     private readonly string _trashDirectory;
     private readonly string _pipelineTempRoot;
+    private readonly string _stagingRoot;
 
     /// <summary>
     /// Full constructor wiring the engine to its phase collaborators. Tests use this to inject fakes
     /// and exercise the orchestration in isolation; production code typically uses the convenience
     /// constructor below, which builds the standard implementations.
     /// </summary>
+    /// <remarks>
+    /// A non-null <paramref name="verifier"/> is used verbatim for every Job (tests inject a specific
+    /// or always-fail verifier here). Pass null to have <see cref="ProcessFile"/> select the verifier
+    /// per-Job from the Profile's <see cref="VerificationMethod"/> — the convenience constructor's
+    /// behavior.
+    /// </remarks>
     public JobEngine(
         IFileOperations files,
         ILogSink log,
@@ -37,6 +52,9 @@ public sealed class JobEngine
         ITransformerRunner transformerRunner,
         IConflictResolver conflictResolver,
         ISourceDisposer sourceDisposer,
+        IVerifier? verifier,
+        MetadataCopier metadataCopier,
+        RollbackEngine rollbackEngine,
         JobEngineOptions? options = null)
     {
         _files = files;
@@ -45,15 +63,21 @@ public sealed class JobEngine
         _transformerRunner = transformerRunner;
         _conflictResolver = conflictResolver;
         _sourceDisposer = sourceDisposer;
+        _verifier = verifier;
+        _metadataCopier = metadataCopier;
+        _rollbackEngine = rollbackEngine;
         JobEngineOptions effective = options ?? new JobEngineOptions();
         _trashDirectory = effective.ResolveTrashDirectory();
         _pipelineTempRoot = effective.ResolvePipelineTempRoot();
+        _stagingRoot = effective.ResolveStagingRoot();
     }
 
     /// <summary>
     /// Convenience constructor that builds the standard phase collaborators over
     /// <paramref name="files"/> (and <paramref name="processRunner"/>, defaulting to a real
-    /// <see cref="SystemProcessRunner"/>).
+    /// <see cref="SystemProcessRunner"/>). The verifier is selected per-Job from the Profile's
+    /// <see cref="VerificationMethod"/> (null verifier ⇒ <see cref="ProcessFile"/> chooses), and the
+    /// native platform trash is wired into source disposition.
     /// </summary>
     public JobEngine(IFileOperations files, ILogSink log, JobEngineOptions? options = null, IProcessRunner? processRunner = null)
         : this(
@@ -62,7 +86,10 @@ public sealed class JobEngine
             new FilterEvaluator(new DedupeIndex(files)),
             new TransformerRunner(files, processRunner ?? new SystemProcessRunner()),
             new ConflictResolver(files),
-            new SourceDisposer(files),
+            new SourceDisposer(files, TrashServiceFactory.Create(files, (options ?? new JobEngineOptions()).ResolveTrashDirectory())),
+            verifier: null,
+            new MetadataCopier(files),
+            new RollbackEngine(files),
             options)
     {
     }
@@ -178,9 +205,23 @@ public sealed class JobEngine
         FileMetadata distMeta = meta;
 
         // The transformer workspace must outlive the chain so distribution can read the working file;
-        // it is torn down in the finally only after Phases 4–5 have copied it out.
+        // it is torn down in the finally only after Phases 4–5 have copied it out. The staging area
+        // (StageOverwrites) and rollback context likewise span the whole distribution.
         var outcomes = new List<TargetOutcome>();
         TempWorkspace? workspace = null;
+        StagingArea? staging = null;
+        var rollback = new RollbackContext();
+
+        // Set when a rollback cannot restore every staged prior version: those originals are still
+        // sitting in the staging area, so the finally teardown must NOT delete it (that would destroy
+        // the user's last copy of the prior Target file). M4's journal makes this resumable.
+        bool preserveStaging = false;
+
+        // The verifier is the injected one (tests) or, for production, selected from the Profile.
+        IVerifier verifier = _verifier
+            ?? VerifierFactory.Create(profile.Policies.VerificationMethod, _files);
+        bool stageOverwrites = profile.Policies.OverwriteHandling == OverwriteHandling.StageOverwrites;
+
         try
         {
             // Phase 3 — Transformer chain (only when the Profile defines one). Runs on an isolated
@@ -217,8 +258,37 @@ public sealed class JobEngine
                 }
             }
 
-            // Phases 4–5 — Distribution to every Target (verification stubbed; atomic placement only).
+            // Phases 4–5 — Distribution + verification to every Target. Per Target the engine writes a
+            // temp copy, verifies it against the final output, optionally stages the prior version,
+            // then atomically promotes the temp and copies metadata. ANY failure (I/O, verification,
+            // or a FailJob metadata loss) rolls back every Target for this file and leaves the source
+            // untouched (§3.3). On success the staged originals are discarded.
             TargetLayout layout = TargetResolver.ResolveLayout(profile);
+
+            // RollbackThenFail runs the §3.3 rollback, logs it, and returns the Failed result.
+            JobResult RollbackThenFail(string reason)
+            {
+                RollbackOutcome undo = _rollbackEngine.Rollback(rollback);
+                string detail =
+                    $"removed {undo.TempsRemoved} temp(s), {undo.FinalsRemoved} placed file(s), restored {undo.OriginalsRestored} original(s)";
+                if (!undo.Clean)
+                    detail += $"; with errors: {string.Join("; ", undo.Errors)}";
+                Emit(LogSeverity.Failure, "ROLLBACK", $"{distFileName}: {detail}");
+
+                // Any staged prior version that rollback could not restore is still in the staging
+                // area. Preserve it (suppress the finally teardown) and tell the operator where it is,
+                // rather than silently destroying the user's last copy of that Target file.
+                int unrestored = rollback.StagedOriginals.Count - undo.OriginalsRestored;
+                if (unrestored > 0 && staging is not null)
+                {
+                    preserveStaging = true;
+                    Emit(LogSeverity.Failure, "STAGING_PRESERVED",
+                        $"{distFileName}: {unrestored} prior Target version(s) could not be restored and remain in {staging.Root}");
+                }
+
+                return Failed(reason);
+            }
+
             try
             {
                 foreach (TargetSpec target in profile.Targets)
@@ -234,26 +304,67 @@ public sealed class JobEngine
                         continue;
                     }
 
-                    AtomicFileWriter.Write(_files, distSource, plan.FinalPath!, plan.Overwrite);
-                    Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {plan.FinalPath} ({plan.Action})");
-                    outcomes.Add(new TargetOutcome(target.Path, plan.FinalPath, plan.Action));
+                    string finalPath = plan.FinalPath!;
+
+                    // Write the copy to a temp beside the destination and record it for rollback.
+                    string temp = AtomicFileWriter.WriteTemp(_files, distSource, finalPath);
+                    rollback.RecordTemp(temp);
+
+                    // Verify the copy against the Job's final output BEFORE any rename/disposition.
+                    VerificationResult verification = verifier.Verify(distSource, temp);
+                    if (!verification.Ok)
+                    {
+                        Emit(LogSeverity.Failure, "VERIFY_FAILED",
+                            $"{distFileName} → {finalPath}: {verification.Reason}");
+                        return RollbackThenFail($"Verification failed for {finalPath}: {verification.Reason}");
+                    }
+
+                    Emit(LogSeverity.Info, "VERIFIED", $"{distFileName} → {finalPath}");
+
+                    // Under StageOverwrites, move the prior version aside immediately before the rename
+                    // so rollback can restore it byte-for-byte.
+                    if (plan.Overwrite && stageOverwrites && _files.FileExists(finalPath))
+                    {
+                        staging ??= StagingArea.Create(_files, _stagingRoot, jobId);
+                        string stagedPath = staging.Stage(finalPath);
+                        rollback.RecordStaged(stagedPath, finalPath);
+                        Emit(LogSeverity.Info, "STAGED", $"{finalPath} → staged prior version");
+                    }
+
+                    // Atomic rename into place; the temp is now a fresh final to remove on rollback.
+                    AtomicFileWriter.Promote(_files, temp, finalPath, plan.Overwrite);
+                    rollback.RecordPromotion(temp, finalPath);
+                    Emit(LogSeverity.Info, "PLACED", $"{distFileName} → {finalPath} ({plan.Action})");
+
+                    // Best-effort metadata preservation; a FailJob-detected loss rolls back.
+                    MetadataResult metadata = _metadataCopier.Copy(
+                        distSource, finalPath, profile.Policies.MetadataOnConflict);
+                    if (!metadata.Ok)
+                    {
+                        Emit(LogSeverity.Failure, "METADATA_FAILED",
+                            $"{distFileName} → {finalPath}: {metadata.Warning}");
+                        return RollbackThenFail($"Metadata preservation failed for {finalPath}: {metadata.Warning}");
+                    }
+
+                    if (metadata.Warning is not null)
+                        Emit(LogSeverity.Info, "METADATA_WARN", $"{distFileName} → {finalPath}: {metadata.Warning}");
+
+                    outcomes.Add(new TargetOutcome(target.Path, finalPath, plan.Action));
                 }
             }
             catch (Exception ex) when (IsIoError(ex))
             {
-                // Surface any Targets already written this run so a partial copy isn't silent.
-                // Real rollback of those placements lands in M3 (§3.3).
-                string placed = string.Join(", ", outcomes
-                    .Where(o => o.Action != TargetAction.Skipped)
-                    .Select(o => o.FinalPath ?? o.TargetRoot));
-                if (placed.Length > 0)
-                    Emit(LogSeverity.Failure, "PARTIAL", $"{distFileName}: distribution failed after placing: {placed}");
-                return Failed($"Target distribution failed: {ex.Message}");
+                return RollbackThenFail($"Target distribution failed: {ex.Message}");
             }
+
+            // Success — the staged prior versions are no longer needed.
+            staging?.DiscardAll();
         }
         finally
         {
             workspace?.Dispose();
+            if (!preserveStaging)
+                staging?.Dispose();
         }
 
         // Phase 6 — Source disposition. Only dispose of the source when at least one Target was
