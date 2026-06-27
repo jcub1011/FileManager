@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparse-package manifest TEMPLATE for the Windows 11 top-level context entry (spec §5.3, Appendix B).
+
+  This registers the IExplorerCommand handler (ExplorerCommandHandler, CLSID
+  {c2f6d1b4-9e3a-4f0c-9d8e-2a7b6c5d4e3f}) as a top-level Win11 context-menu command so the entry appears
+  WITHOUT "Show more options". It is a SPARSE package: the actual binaries live on disk next to the
+  installed app (ExternalLocation), not inside the .msix.
+
+  IMPORTANT (Appendix B / milestone scope): this milestone ships the manifest + COM handler + signing
+  notes ONLY. Building and SIGNING the .msix is deferred to M9 — see SIGNING.md. Nothing in the build or
+  CI packages or signs this; the registry-verb fallback (RegistryVerbs.cs) covers the path today.
+
+  Replace the placeholders (Publisher, ExternalLocation, Version) at packaging time.
+-->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+         xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+         IgnorableNamespaces="uap uap3 com desktop desktop4 desktop5 uap10">
+
+  <Identity Name="FileManager.ShellExtension"
+            Publisher="CN=FileManager (REPLACE WITH SIGNING SUBJECT)"
+            Version="1.0.0.0" />
+
+  <Properties>
+    <DisplayName>FileManager Shell Integration</DisplayName>
+    <PublisherDisplayName>FileManager</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- Sparse package: binaries live at this on-disk location, not inside the .msix. -->
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.22631.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="FileManagerShell"
+                 Executable="FileManager.Shell.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="FileManager"
+                          Description="FileManager shell integration"
+                          BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png"
+                          Square44x44Logo="Assets\Square44x44Logo.png"
+                          AppListEntry="none" />
+
+      <Extensions>
+        <!-- The COM server hosting the IExplorerCommand handler. -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="FileManager Explorer Command">
+              <com:Class Id="c2f6d1b4-9e3a-4f0c-9d8e-2a7b6c5d4e3f"
+                         Path="FileManager.Shell.exe"
+                         ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+
+        <!-- Register the handler as a top-level context-menu command for files and folders. -->
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="FileManagerRun" Clsid="c2f6d1b4-9e3a-4f0c-9d8e-2a7b6c5d4e3f" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb Id="FileManagerRun" Clsid="c2f6d1b4-9e3a-4f0c-9d8e-2a7b6c5d4e3f" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

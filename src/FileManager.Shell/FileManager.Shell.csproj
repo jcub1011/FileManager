@@ -4,16 +4,25 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>FileManager.Shell</RootNamespace>
     <AssemblyName>FileManager.Shell</AssemblyName>
+    <!-- Source-generated COM (GeneratedComInterface/GeneratedComClass) for the IExplorerCommand handler
+         emits unsafe marshalling stubs. Scoped to this project only; Core/Contracts stay safe + AOT-clean. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--
-    The shell integration entry (M6): a thin CLI that submits a Payload to the running service over
-    IPC, starting the service first if it is not up (start-if-not-running handoff, §2). References
-    FileManager.Contracts ONLY (the wire DTOs + framing) — not Core — so it stays a tiny, AOT-clean
-    launcher with no engine dependency.
+    The shell integration entry (M6 submit + M8 manual invocation & OS registration): a thin CLI that
+    submits a Payload to the running service over IPC (start-if-not-running, §2), and registers the OS
+    right-click entries (HKCU verbs on Windows, per-FM actions on Linux). References FileManager.Contracts
+    ONLY (the wire DTOs + framing) — not Core/Service — so it stays a tiny, AOT-clean launcher.
   -->
   <ItemGroup>
     <ProjectReference Include="..\FileManager.Contracts\FileManager.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Ship the sparse-MSIX manifest template + signing notes alongside the binary (M9 packages/signs). -->
+  <ItemGroup>
+    <None Include="Windows\msix\AppxManifest.xml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Windows\msix\SIGNING.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -81,6 +81,9 @@ public sealed class ConnectionDispatcher
         MessageKind.DryRun when request.DryRun is { } dryRun =>
             IpcMessage.ForDryRunReport(_engine.DryRun(dryRun)),
 
+        MessageKind.ResolveManualInvocation when request.ResolveManualInvocation is { } resolve =>
+            IpcMessage.ForSubmitResult(_engine.ResolveManualInvocation(resolve)),
+
         _ => LogAndIgnore(request.Kind),
     };
 
@@ -90,17 +93,36 @@ public sealed class ConnectionDispatcher
         return null;
     }
 
-    // Drains the connection's subscription onto the wire, pushing each JobEvent as a framed message
-    // until the broadcaster completes the reader or the peer disconnects (a write fault ends the loop).
+    // Drains the connection's subscription onto the wire, pushing each server message (JobEvent and
+    // ManualInvocationPending) as a framed envelope until the broadcaster completes the reader or the peer
+    // disconnects (a write fault ends the loop).
+    //
+    // Lost-push fix: a manual invocation may be published BEFORE a cold-started GUI finishes subscribing,
+    // so right after registering the subscription we REPLAY every currently-unresolved pending into this
+    // connection. To guarantee a given pending reaches a client exactly once (live if it was subscribed at
+    // publish time, else via replay), we dedup ManualInvocationPending by InvocationId per connection.
     private async Task StreamEventsAsync(Stream stream, CancellationToken cancellationToken)
     {
         using EventBroadcaster.Subscription subscription = _events.Subscribe();
+
+        // Replay must be offered AFTER Subscribe so a pending published concurrently still arrives (it may
+        // arrive both live and via replay — the per-connection dedup below collapses that to one).
+        foreach (ManualInvocationPending pending in _engine.GetUnresolvedManualInvocations())
+            subscription.Offer(IpcMessage.ForManualInvocationPending(pending));
+
+        var deliveredPendings = new HashSet<string>(StringComparer.Ordinal);
         try
         {
-            await foreach (JobEvent jobEvent in subscription.Reader.ReadAllAsync(cancellationToken)
+            await foreach (IpcMessage message in subscription.Reader.ReadAllAsync(cancellationToken)
                 .ConfigureAwait(false))
             {
-                byte[] payload = ContractsSerializer.SerializeToUtf8Bytes(IpcMessage.ForEvent(jobEvent));
+                if (message is { Kind: MessageKind.ManualInvocationPending, ManualInvocationPending: { } p }
+                    && !deliveredPendings.Add(p.InvocationId))
+                {
+                    continue; // already delivered to this connection (live + replay overlap) — drop the dup.
+                }
+
+                byte[] payload = ContractsSerializer.SerializeToUtf8Bytes(message);
                 await Framing.WriteMessageAsync(stream, payload, cancellationToken).ConfigureAwait(false);
             }
         }

@@ -32,10 +32,17 @@ public sealed class App : Application
             var pathPicker = new PathPickerService(fileSystem);
             var folderBrowser = new AvaloniaFolderBrowser();
 
-            var viewModel = new MainWindowViewModel(client, notifications, dispatcher, pathPicker, folderBrowser);
+            // The §3.2 manual-invocation chooser is parented on the main window once it exists. A late
+            // accessor avoids a construction-order cycle (the presenter needs the window the VM populates).
+            MainWindow? mainWindow = null;
+            var chooserPresenter = new AvaloniaManualInvocationPresenter(() => mainWindow!, client);
+
+            var viewModel = new MainWindowViewModel(
+                client, notifications, dispatcher, pathPicker, folderBrowser, chooserPresenter);
             viewModel.Start();
 
             var window = new MainWindow { DataContext = viewModel };
+            mainWindow = window;
             // Give the notifier + folder browser a TopLevel so failure notifications render as visible
             // in-app toasts (§7) and the editor's Browse… opens the OS folder picker (FIX 5).
             notifications.AttachTopLevel(window);

@@ -57,7 +57,19 @@ public sealed class IpcClient : IServiceClient
     }
 
     /// <inheritdoc/>
-    public async Task SubscribeAsync(Action<JobEvent> onEvent, CancellationToken cancellationToken)
+    public async Task<SubmitPayloadResult?> ResolveManualInvocationAsync(
+        ResolveManualInvocation resolution, CancellationToken cancellationToken = default)
+    {
+        IpcMessage? reply = await RequestAsync(IpcMessage.ForResolveManualInvocation(resolution), cancellationToken)
+            .ConfigureAwait(false);
+        return reply?.SubmitResult;
+    }
+
+    /// <inheritdoc/>
+    public async Task SubscribeAsync(
+        Action<JobEvent> onEvent,
+        Action<ManualInvocationPending> onManualPending,
+        CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -76,10 +88,18 @@ public sealed class IpcClient : IServiceClient
                     if (frame is null)
                         break; // service closed at a frame boundary — fall through to reconnect.
 
-                    if (ContractsSerializer.TryDeserialize(frame, out IpcMessage? message, out _)
-                        && message is { Kind: MessageKind.Event, Event: { } jobEvent })
+                    if (!ContractsSerializer.TryDeserialize(frame, out IpcMessage? message, out _)
+                        || message is null)
+                        continue;
+
+                    switch (message)
                     {
-                        onEvent(jobEvent);
+                        case { Kind: MessageKind.Event, Event: { } jobEvent }:
+                            onEvent(jobEvent);
+                            break;
+                        case { Kind: MessageKind.ManualInvocationPending, ManualInvocationPending: { } pending }:
+                            onManualPending(pending);
+                            break;
                     }
                 }
             }

@@ -56,6 +56,7 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
     private Scheduler? _scheduler;
     private LastRunStore? _lastRuns;
     private PayloadQueue? _payloads;
+    private ManualInvocationRouter? _manualInvocations;
     private EventBroadcaster? _events;
     private IpcServer? _ipc;
     private ITrayIndicator _tray = NullTrayIndicator.Instance;
@@ -146,6 +147,7 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
         _payloads = new PayloadQueue(
             _queue, () => _profiles, _files, _clock,
             onEnqueued: count => Interlocked.Add(ref _enqueued, count));
+        _manualInvocations = new ManualInvocationRouter(_payloads, _clock);
 
         // 7. Scheduler startup sweep: fire any catch-up runs immediately, enqueuing their files.
         _lastRuns = LastRunStore.FromConfig(_configDir);
@@ -447,15 +449,47 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
     // ---- IEngineFacade ----
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// A MANUAL submission (<see cref="SubmitPayload.IsManual"/>, the §3.2 right-click path) is NEVER
+    /// auto-enqueued: it registers a pending invocation with the <see cref="ManualInvocationRouter"/>,
+    /// broadcasts a <see cref="ManualInvocationPending"/> so a subscribed GUI raises the always-prompt
+    /// chooser, and returns an accepted-but-pending result (0 queued) carrying the invocation id. The
+    /// chosen Profile is enqueued later via <see cref="ResolveManualInvocation"/>. Non-manual submissions
+    /// (watcher/scheduler/GUI) enqueue immediately, exactly as before.
+    /// </remarks>
     public SubmitPayloadResult Submit(SubmitPayload payload)
     {
-        if (_payloads is null)
+        if (_payloads is null || _manualInvocations is null)
             return SubmitPayloadResult.Rejected("Service not started.");
+
+        if (payload.IsManual)
+        {
+            // Register a pending choice and notify subscribers. We do NOT enqueue here — the always-prompt
+            // invariant (§3.2): a manual invocation always reaches a prompt, never silently runs/drops.
+            ManualInvocationPending pending = _manualInvocations.Register(payload);
+            _events?.Publish(IpcMessage.ForManualInvocationPending(pending));
+            LogLine(LogSeverity.Info, "MANUAL_PENDING",
+                $"Manual invocation '{pending.InvocationId}' for '{pending.Path}' awaiting profile choice ({pending.Matches.Count} match(es)).");
+            return SubmitPayloadResult.Pending(pending.InvocationId);
+        }
 
         // The enqueue count is accounted inside PayloadQueue (via the onEnqueued callback wired in
         // StartAsync) so IPC, watcher, and scheduler submissions all increment _enqueued uniformly.
         return _payloads.Submit(payload);
     }
+
+    /// <inheritdoc/>
+    public SubmitPayloadResult ResolveManualInvocation(ResolveManualInvocation resolution)
+    {
+        if (_manualInvocations is null)
+            return SubmitPayloadResult.Rejected("Service not started.");
+
+        return _manualInvocations.Resolve(resolution);
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<ManualInvocationPending> GetUnresolvedManualInvocations() =>
+        _manualInvocations?.SnapshotUnresolved() ?? Array.Empty<ManualInvocationPending>();
 
     /// <inheritdoc/>
     public EngineState GetState()

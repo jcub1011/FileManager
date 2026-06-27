@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FileManager.Shell.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Test assemblies are not AOT-published; the test runner uses reflection. -->
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!--
+    The shell launcher + OS registration generators under test, plus shared Contracts. Tests assert the
+    PURE generated content (registry entries, Linux action files, IExplorerCommand verb logic, detector)
+    and NEVER touch the real registry / FM config dirs / spawn a process — mirroring the M6 generation-only
+    pattern, so the suite runs identically on Windows and Linux CI with no display server.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FileManager.Shell\FileManager.Shell.csproj" />
+    <ProjectReference Include="..\..\src\FileManager.Contracts\FileManager.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

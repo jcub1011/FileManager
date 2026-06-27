@@ -43,6 +43,7 @@ internal sealed class CapturingNotifier : INotificationService
 internal sealed class FakeServiceClient : IServiceClient
 {
     private Action<JobEvent>? _onEvent;
+    private Action<ManualInvocationPending>? _onManualPending;
     private TaskCompletionSource _subscribed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public EngineState? State { get; set; } = new(0, 0, 1, 0, 0, 0, 0);
@@ -50,7 +51,10 @@ internal sealed class FakeServiceClient : IServiceClient
     public ReloadResult? Reload { get; set; } = new(1, Array.Empty<string>());
     public DryRunReport? Report { get; set; }
 
-    /// <summary>Completes once <see cref="SubscribeAsync"/> has registered the callback.</summary>
+    /// <summary>The manual-invocation resolutions this client was asked to send (for assertions).</summary>
+    public List<ResolveManualInvocation> Resolutions { get; } = new();
+
+    /// <summary>Completes once <see cref="SubscribeAsync"/> has registered the callbacks.</summary>
     public Task Subscribed => _subscribed.Task;
 
     public Task<EngineState?> GetStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(State);
@@ -64,9 +68,20 @@ internal sealed class FakeServiceClient : IServiceClient
     public Task<DryRunReport?> DryRunAsync(DryRunRequest request, CancellationToken cancellationToken = default) =>
         Task.FromResult(Report);
 
-    public Task SubscribeAsync(Action<JobEvent> onEvent, CancellationToken cancellationToken)
+    public Task<SubmitPayloadResult?> ResolveManualInvocationAsync(
+        ResolveManualInvocation resolution, CancellationToken cancellationToken = default)
+    {
+        Resolutions.Add(resolution);
+        return Task.FromResult<SubmitPayloadResult?>(SubmitPayloadResult.Ok(Array.Empty<string>()));
+    }
+
+    public Task SubscribeAsync(
+        Action<JobEvent> onEvent,
+        Action<ManualInvocationPending> onManualPending,
+        CancellationToken cancellationToken)
     {
         _onEvent = onEvent;
+        _onManualPending = onManualPending;
         _subscribed.TrySetResult();
         var tcs = new TaskCompletionSource();
         cancellationToken.Register(() => tcs.TrySetResult());
@@ -75,6 +90,9 @@ internal sealed class FakeServiceClient : IServiceClient
 
     /// <summary>Pushes a Job event to the subscribed callback (drives <see cref="ViewModels.ActivityViewModel"/>).</summary>
     public void PushEvent(JobEvent jobEvent) => _onEvent?.Invoke(jobEvent);
+
+    /// <summary>Pushes a manual-invocation-pending notification to the subscribed callback.</summary>
+    public void PushManualPending(ManualInvocationPending pending) => _onManualPending?.Invoke(pending);
 }
 
 /// <summary>Per-OS unique endpoint + cleanup for the in-process IpcClient round-trip tests.</summary>
