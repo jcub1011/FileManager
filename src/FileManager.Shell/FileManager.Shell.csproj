@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FileManager.Shell</RootNamespace>
+    <AssemblyName>FileManager.Shell</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    The shell integration entry (M6): a thin CLI that submits a Payload to the running service over
+    IPC, starting the service first if it is not up (start-if-not-running handoff, §2). References
+    FileManager.Contracts ONLY (the wire DTOs + framing) — not Core — so it stays a tiny, AOT-clean
+    launcher with no engine dependency.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\FileManager.Contracts\FileManager.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
