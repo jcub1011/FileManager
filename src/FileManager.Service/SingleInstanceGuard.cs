@@ -72,24 +72,24 @@ public sealed class SingleInstanceGuard : IDisposable
         return new SingleInstanceGuard(mutex, held);
     }
 
-    /// <summary>The outcome of probing an existing socket path.</summary>
+    /// <summary>The outcome of probing an existing path at the socket endpoint.</summary>
     private enum SocketProbe
     {
-        /// <summary>A connect succeeded — a live server is serving this path (we are secondary).</summary>
+        /// <summary>A live server answered a connect — another instance is serving (we are secondary).</summary>
         Live,
 
-        /// <summary>Connect was specifically refused — a stale socket from a crashed instance.</summary>
-        StaleRefused,
+        /// <summary>Confirmed a Unix socket with no listener (a crashed instance) — safe to clear.</summary>
+        StaleSocket,
 
-        /// <summary>Connect failed some other way — the path may not be a socket / may be transient.</summary>
+        /// <summary>The path is not a socket, or the state is otherwise unclear — must NOT be deleted.</summary>
         Indeterminate,
     }
 
-    // Linux: a live server answers a connect on the socket path ⇒ secondary. We only treat the path as a
-    // stale socket (and delete it) when connect fails with the SPECIFIC "connection refused" error — the
-    // signal a real socket file with no listener gives. Any OTHER failure (a non-socket file, a peer
-    // mid-restart that created the file but is not yet listening, a permission error) is treated as
-    // indeterminate and we do NOT delete, so we never remove an arbitrary file.
+    // Linux: decide whether the existing endpoint path is a live server, a stale socket we may clear, or
+    // something we must leave alone. CRITICAL: on real Linux connect() returns ECONNREFUSED for BOTH a
+    // stale socket AND a regular (non-socket) file, so connection-refused alone CANNOT distinguish them.
+    // We therefore classify the FILE TYPE first (open-as-file), and only run the liveness probe once the
+    // path is confirmed to be a socket — so a non-socket file is never deleted.
     private static SingleInstanceGuard AcquireUnix(string socketPath)
     {
         if (!File.Exists(socketPath))
@@ -100,8 +100,8 @@ public sealed class SingleInstanceGuard : IDisposable
             case SocketProbe.Live:
                 return new SingleInstanceGuard(null, held: false); // another instance is serving.
 
-            case SocketProbe.StaleRefused:
-                // Confirmed stale socket — clear it so the transport can bind fresh.
+            case SocketProbe.StaleSocket:
+                // Confirmed a socket with no listener — clear it so the transport can bind fresh.
                 try
                 {
                     File.Delete(socketPath);
@@ -114,31 +114,66 @@ public sealed class SingleInstanceGuard : IDisposable
                 return new SingleInstanceGuard(null, held: true);
 
             default:
-                // Indeterminate: do not delete (could be a non-socket file or a peer mid-restart). Treat
-                // as not-primary so we never race a possibly-live peer or destroy an unrelated file. There
-                // is a small residual race (a peer that created the socket file but has not begun
-                // listening reads as refused) — but refused specifically means no listener is bound, so a
-                // deletion in that window is benign: the peer's bind would have failed on the live file
-                // anyway, and our transport recreates the file.
+                // Indeterminate: a non-socket file, a peer mid-restart, or a permission error. Never
+                // delete and treat as not-primary, so we cannot destroy an unrelated file or race a peer.
                 return new SingleInstanceGuard(null, held: false);
         }
     }
 
     private static SocketProbe Probe(string socketPath)
     {
+        // Step 1 — classify the file type. A Unix domain socket's inode cannot be opened as a normal
+        // file: on Linux open() on a socket fails immediately with ENXIO (surfaced as IOException), and
+        // never blocks. A REGULAR file opens fine. So a successful open proves it is NOT a socket, and we
+        // must refuse without deleting; a failed open is the signal that it IS a socket (proceed to the
+        // liveness probe). FileShare.ReadWrite avoids a sharing-violation false negative on a real file.
+        if (!IsUnixSocket(socketPath, out SocketProbe classification))
+            return classification;
+
+        // Step 2 — liveness probe (only now that we know it is a socket). A successful connect means a
+        // live listener; ECONNREFUSED means the socket is bound on disk but no process is listening
+        // (a crashed instance) ⇒ stale and safe to clear; anything else is indeterminate.
         try
         {
             using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             socket.Connect(new UnixDomainSocketEndPoint(socketPath));
-            return SocketProbe.Live; // something is listening.
+            return SocketProbe.Live;
         }
         catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionRefused)
         {
-            return SocketProbe.StaleRefused; // a real socket with no listener bound.
+            return SocketProbe.StaleSocket;
         }
         catch (Exception ex) when (ex is SocketException or IOException or InvalidOperationException)
         {
             return SocketProbe.Indeterminate;
+        }
+    }
+
+    // Attempts to open the path as a normal file to classify its type, AOT-safely with only the BCL (no
+    // stat() P/Invoke). Returns true when the path is a Unix socket (open failed the way a socket does);
+    // returns false with a non-socket <paramref name="classification"/> when it is a regular file (open
+    // succeeded) or could not be classified (permission error etc.) — both of which must NOT be deleted.
+    private static bool IsUnixSocket(string socketPath, out SocketProbe classification)
+    {
+        try
+        {
+            using var stream = new FileStream(socketPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            // Opened as a regular file ⇒ NOT a socket ⇒ must refuse without deleting.
+            classification = SocketProbe.Indeterminate;
+            return false;
+        }
+        catch (IOException)
+        {
+            // open() on a socket inode fails (ENXIO) — the expected, non-blocking signal that it IS a
+            // socket. Proceed to the liveness probe.
+            classification = SocketProbe.Indeterminate; // unused when returning true.
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException)
+        {
+            // Cannot classify (e.g. permission denied) — be safe: do not delete, refuse.
+            classification = SocketProbe.Indeterminate;
+            return false;
         }
     }
 
