@@ -21,10 +21,10 @@ public sealed class EventBroadcasterTests
         broadcaster.Publish(Evt("a"));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        JobEvent r1 = await s1.Reader.ReadAsync(cts.Token);
-        JobEvent r2 = await s2.Reader.ReadAsync(cts.Token);
-        Assert.Equal("a", r1.JobId);
-        Assert.Equal("a", r2.JobId);
+        IpcMessage r1 = await s1.Reader.ReadAsync(cts.Token);
+        IpcMessage r2 = await s2.Reader.ReadAsync(cts.Token);
+        Assert.Equal("a", r1.Event!.JobId);
+        Assert.Equal("a", r2.Event!.JobId);
     }
 
     [Fact]

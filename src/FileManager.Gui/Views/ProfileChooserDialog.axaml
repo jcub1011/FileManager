@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FileManager.Gui.ViewModels"
+        x:Class="FileManager.Gui.Views.ProfileChooserDialog"
+        x:DataType="vm:ProfileChooserViewModel"
+        Width="520" Height="420"
+        WindowStartupLocation="CenterOwner"
+        Title="Choose a Profile">
+  <DockPanel Margin="14">
+    <StackPanel DockPanel.Dock="Top" Spacing="6">
+      <TextBlock Text="Run a Profile on:" FontWeight="Bold" />
+      <TextBlock Text="{Binding InvokedPath}" TextWrapping="Wrap" Foreground="#9FB3C8" />
+      <TextBlock Text="No Profile matches this path — create one to continue."
+                 Foreground="#FFD8A8" IsVisible="{Binding HasNoMatches}" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                HorizontalAlignment="Right" Margin="0,10,0,0">
+      <Button Content="Create Profile…" Command="{Binding CreateProfileCommand}" />
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Content="Run" Command="{Binding ChooseCommand}" IsDefault="True" />
+    </StackPanel>
+
+    <ListBox ItemsSource="{Binding Matches}" SelectedItem="{Binding Selected}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ProfileChoice">
+          <TextBlock Text="{Binding Name}" />
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</Window>

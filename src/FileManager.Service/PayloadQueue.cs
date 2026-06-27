@@ -94,6 +94,30 @@ public sealed class PayloadQueue
         return SubmitPayloadResult.Ok(jobIds);
     }
 
+    /// <summary>
+    /// Returns EVERY active Profile whose configured Source owns <paramref name="path"/> (file or
+    /// directory), in no particular order. Unlike <see cref="ResolveProfile"/> (which picks the single
+    /// best/most-specific match), this surfaces ALL candidates so the manual-invocation chooser (§3.2)
+    /// can present every applicable Profile and the user always picks explicitly. An empty result is
+    /// valid — the chooser still appears with "Create Profile…" so a path outside every Source is never
+    /// a dead end.
+    /// </summary>
+    public IReadOnlyList<Profile> ResolveMatchingProfiles(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return Array.Empty<Profile>();
+
+        string normalized = PathNormalizer.Normalize(path);
+        var matches = new List<Profile>();
+        foreach (Profile profile in _activeProfiles())
+        {
+            if (profile.Sources.Any(s => PathNormalizer.IsUnder(s.Path, normalized)))
+                matches.Add(profile);
+        }
+
+        return matches;
+    }
+
     // Picks the Profile to run under: the named one (when ProfileId is set and it owns the path), else
     // the Profile whose Source most specifically contains the path. Returns null with a reason when none.
     private static Profile? ResolveProfile(

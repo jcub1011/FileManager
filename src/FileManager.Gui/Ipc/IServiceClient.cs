@@ -24,9 +24,22 @@ public interface IServiceClient
     public Task<DryRunReport?> DryRunAsync(DryRunRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Subscribes to the Job-event stream, invoking <paramref name="onEvent"/> for each pushed
-    /// <see cref="JobEvent"/> until <paramref name="cancellationToken"/> fires. Reconnects with backoff
-    /// when the service restarts; never throws — connection faults are absorbed and retried.
+    /// Answers a pending manual shell invocation (spec §3.2 always-prompt chooser): sends the user's
+    /// chosen Profile id (or null to cancel) for <paramref name="resolution"/>'s invocation and returns
+    /// the service's enqueue result, or null if the service is unreachable.
     /// </summary>
-    public Task SubscribeAsync(Action<JobEvent> onEvent, CancellationToken cancellationToken);
+    public Task<SubmitPayloadResult?> ResolveManualInvocationAsync(
+        ResolveManualInvocation resolution, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Subscribes to the server push stream, invoking <paramref name="onEvent"/> for each pushed
+    /// <see cref="JobEvent"/> and <paramref name="onManualPending"/> for each
+    /// <see cref="ManualInvocationPending"/> (the §3.2 chooser trigger), until
+    /// <paramref name="cancellationToken"/> fires. Reconnects with backoff when the service restarts;
+    /// never throws — connection faults are absorbed and retried.
+    /// </summary>
+    public Task SubscribeAsync(
+        Action<JobEvent> onEvent,
+        Action<ManualInvocationPending> onManualPending,
+        CancellationToken cancellationToken);
 }

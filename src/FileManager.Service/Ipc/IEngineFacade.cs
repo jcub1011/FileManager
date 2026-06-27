@@ -24,4 +24,19 @@ public interface IEngineFacade
 
     /// <summary>Previews what processing the request would do. M6 returns a shape-only stub.</summary>
     public DryRunReport DryRun(DryRunRequest request);
+
+    /// <summary>
+    /// Resolves a pending manual shell invocation (spec §3.2): enqueues the chosen Profile's Jobs for the
+    /// pending path, or discards the pending when the user cancelled. Returns the enqueue result (or a
+    /// rejection for an unknown/expired id or a cancel).
+    /// </summary>
+    public SubmitPayloadResult ResolveManualInvocation(ResolveManualInvocation resolution);
+
+    /// <summary>
+    /// Snapshots every currently-unresolved manual invocation as a <see cref="ManualInvocationPending"/>.
+    /// The IPC layer replays these to a newly-subscribed client so a prompt published BEFORE that client
+    /// finished booting + subscribing (e.g. a cold-started GUI) is still delivered — closing the
+    /// lost-push race and guaranteeing a manual invocation is never silently dropped.
+    /// </summary>
+    public IReadOnlyList<ManualInvocationPending> GetUnresolvedManualInvocations();
 }

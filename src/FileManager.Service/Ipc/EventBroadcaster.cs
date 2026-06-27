@@ -4,12 +4,14 @@ using FileManager.Contracts.Messages;
 namespace FileManager.Service.Ipc;
 
 /// <summary>
-/// A thread-safe fan-out of <see cref="JobEvent"/>s to the set of currently-subscribed connections. A
-/// connection that issues <c>Subscribe</c> registers a <see cref="Subscription"/>; the engine calls
-/// <see cref="Publish"/> for each event and every live subscriber's bounded channel receives a copy. A
-/// slow/dead subscriber never blocks the publisher: its channel drops the oldest event under
-/// backpressure (event delivery is best-effort telemetry, not durable state — the journal owns
-/// durability).
+/// A thread-safe fan-out of pushed <see cref="IpcMessage"/> envelopes to the set of currently-subscribed
+/// connections. A connection that issues <c>Subscribe</c> registers a <see cref="Subscription"/>; the
+/// engine calls <see cref="Publish(JobEvent)"/> for each Job event (M5/M7) and
+/// <see cref="Publish(IpcMessage)"/> for other server pushes such as
+/// <see cref="ManualInvocationPending"/> (M8 always-prompt), and every live subscriber's bounded channel
+/// receives a copy. A slow/dead subscriber never blocks the publisher: its channel drops the oldest
+/// message under backpressure (push delivery is best-effort telemetry/notification, not durable state —
+/// the journal owns durability).
 /// </summary>
 public sealed class EventBroadcaster
 {
@@ -23,7 +25,7 @@ public sealed class EventBroadcaster
     }
 
     /// <summary>
-    /// Registers a new subscriber and returns its <see cref="Subscription"/>. The caller reads events
+    /// Registers a new subscriber and returns its <see cref="Subscription"/>. The caller reads messages
     /// from <see cref="Subscription.Reader"/> and disposes it to unregister when the connection closes.
     /// </summary>
     public Subscription Subscribe()
@@ -34,15 +36,18 @@ public sealed class EventBroadcaster
         return subscription;
     }
 
-    /// <summary>Fans <paramref name="jobEvent"/> out to every live subscriber (best-effort, non-blocking).</summary>
-    public void Publish(JobEvent jobEvent)
+    /// <summary>Fans a <see cref="JobEvent"/> out to every live subscriber (best-effort, non-blocking).</summary>
+    public void Publish(JobEvent jobEvent) => Publish(IpcMessage.ForEvent(jobEvent));
+
+    /// <summary>Fans a server-push <paramref name="message"/> out to every live subscriber (best-effort, non-blocking).</summary>
+    public void Publish(IpcMessage message)
     {
         Subscription[] snapshot;
         lock (_gate)
             snapshot = _subscribers.ToArray();
 
         foreach (Subscription subscription in snapshot)
-            subscription.Offer(jobEvent);
+            subscription.Offer(message);
     }
 
     private void Remove(Subscription subscription)
@@ -52,20 +57,20 @@ public sealed class EventBroadcaster
     }
 
     /// <summary>
-    /// One connection's event subscription: a bounded channel whose <see cref="Reader"/> the dispatcher
-    /// drains onto the wire. Dropping the oldest under backpressure keeps a slow client from stalling
-    /// the publisher.
+    /// One connection's push subscription: a bounded channel whose <see cref="Reader"/> the dispatcher
+    /// drains onto the wire. Dropping the oldest under backpressure keeps a slow client from stalling the
+    /// publisher.
     /// </summary>
     public sealed class Subscription : IDisposable
     {
         private readonly EventBroadcaster _owner;
-        private readonly Channel<JobEvent> _channel;
+        private readonly Channel<IpcMessage> _channel;
         private int _disposed;
 
         internal Subscription(EventBroadcaster owner)
         {
             _owner = owner;
-            _channel = Channel.CreateBounded<JobEvent>(new BoundedChannelOptions(256)
+            _channel = Channel.CreateBounded<IpcMessage>(new BoundedChannelOptions(256)
             {
                 FullMode = BoundedChannelFullMode.DropOldest,
                 SingleReader = true,
@@ -73,10 +78,10 @@ public sealed class EventBroadcaster
             });
         }
 
-        /// <summary>The reader the dispatcher awaits to stream events to this connection.</summary>
-        public ChannelReader<JobEvent> Reader => _channel.Reader;
+        /// <summary>The reader the dispatcher awaits to stream pushed messages to this connection.</summary>
+        public ChannelReader<IpcMessage> Reader => _channel.Reader;
 
-        internal void Offer(JobEvent jobEvent) => _channel.Writer.TryWrite(jobEvent);
+        internal void Offer(IpcMessage message) => _channel.Writer.TryWrite(message);
 
         /// <summary>Unregisters this subscription and completes its reader so the streaming loop ends.</summary>
         public void Dispose()

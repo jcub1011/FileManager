@@ -33,6 +33,10 @@ public sealed class IpcClientTests
         public ProfileList ListProfiles() => new(Array.Empty<ProfileSummary>());
         public ReloadResult ReloadProfiles() => new(0, Array.Empty<string>());
         public DryRunReport DryRun(DryRunRequest request) => ReportValue;
+        public SubmitPayloadResult ResolveManualInvocation(ResolveManualInvocation resolution) =>
+            SubmitPayloadResult.Ok(new[] { "j-resolved" });
+        public IReadOnlyList<ManualInvocationPending> GetUnresolvedManualInvocations() =>
+            Array.Empty<ManualInvocationPending>();
     }
 
     private static (IpcServer Server, EventBroadcaster Events) NewServer(string endpoint, IEngineFacade engine)
@@ -119,7 +123,7 @@ public sealed class IpcClientTests
         {
             var client = new IpcClient(new OsIpcClientTransport(endpoint), Generous, TimeSpan.FromMilliseconds(50));
             Task subscription = Task.Run(
-                () => client.SubscribeAsync(e => received.TrySetResult(e), cts.Token), cts.Token);
+                () => client.SubscribeAsync(e => received.TrySetResult(e), _ => { }, cts.Token), cts.Token);
 
             // Wait (signal-based) for the subscriber to register on the server, then publish.
             while (events.SubscriberCount == 0)

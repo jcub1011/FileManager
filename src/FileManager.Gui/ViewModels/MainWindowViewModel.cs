@@ -17,6 +17,8 @@ namespace FileManager.Gui.ViewModels;
 public sealed partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IServiceClient _client;
+    private readonly IUiDispatcher _dispatcher;
+    private readonly IManualInvocationPresenter? _chooserPresenter;
     private CancellationTokenSource? _subscriptionCts;
 
     [ObservableProperty] private int _selectedTab;
@@ -38,9 +40,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         INotificationService notifications,
         IUiDispatcher dispatcher,
         PathPickerService? pathPicker = null,
-        IFolderBrowser? folderBrowser = null)
+        IFolderBrowser? folderBrowser = null,
+        IManualInvocationPresenter? chooserPresenter = null)
     {
         _client = client;
+        _dispatcher = dispatcher;
+        _chooserPresenter = chooserPresenter;
         // The path picker (built on IFileSystemService) is threaded into the editor so Source/Target
         // rows can browse the filesystem — not discarded (FIX 5).
         PathPickerService picker = pathPicker ?? new PathPickerService(new FileSystemService());
@@ -60,8 +65,29 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         _subscriptionCts = new CancellationTokenSource();
         CancellationToken token = _subscriptionCts.Token;
-        _ = Task.Run(() => _client.SubscribeAsync(Activity.OnJobEvent, token), token);
+        _ = Task.Run(() => _client.SubscribeAsync(Activity.OnJobEvent, OnManualInvocationPending, token), token);
         _ = RefreshStateAsync();
+    }
+
+    /// <summary>
+    /// Handles a pushed <see cref="ManualInvocationPending"/> (spec §3.2): raises the always-prompt
+    /// chooser (via the injected presenter, marshalled onto the UI thread), awaits the user's pick, and
+    /// sends the <see cref="ResolveManualInvocation"/> back — the chosen Profile id, or null on cancel.
+    /// No presenter (headless) still answers with a cancel so the service's pending never leaks. Public
+    /// so a test can drive it without a real subscription.
+    /// </summary>
+    public void OnManualInvocationPending(ManualInvocationPending pending) =>
+        _dispatcher.Post(() => _ = HandleManualInvocationAsync(pending));
+
+    private async Task HandleManualInvocationAsync(ManualInvocationPending pending)
+    {
+        string? chosenProfileId = _chooserPresenter is null
+            ? null // headless/no chooser: cancel so the pending is discarded, never silently run.
+            : await _chooserPresenter.ChooseAsync(pending).ConfigureAwait(true);
+
+        await _client
+            .ResolveManualInvocationAsync(new ResolveManualInvocation(pending.InvocationId, chosenProfileId))
+            .ConfigureAwait(true);
     }
 
     /// <summary>Stops the background subscription loop.</summary>

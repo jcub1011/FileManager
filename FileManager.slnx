@@ -22,6 +22,7 @@
     <Project Path="tests/FileManager.Core.Tests/FileManager.Core.Tests.csproj" />
     <Project Path="tests/FileManager.Service.Tests/FileManager.Service.Tests.csproj" />
     <Project Path="tests/FileManager.Gui.Tests/FileManager.Gui.Tests.csproj" />
+    <Project Path="tests/FileManager.Shell.Tests/FileManager.Shell.Tests.csproj" />
     <Project Path="tests/FileManager.TestStub/FileManager.TestStub.csproj" />
   </Folder>
 </Solution>

@@ -62,6 +62,24 @@ internal sealed class FakeEngine : IEngineFacade
     public ReloadResult ReloadProfiles() => Reload;
 
     public DryRunReport DryRun(DryRunRequest request) => DryRunReport.NotImplemented();
+
+    /// <summary>The last manual-invocation resolution routed through the engine (for assertions).</summary>
+    public ResolveManualInvocation? LastResolve { get; private set; }
+
+    public Func<ResolveManualInvocation, SubmitPayloadResult> OnResolve { get; set; } =
+        _ => SubmitPayloadResult.Ok(new[] { "job-resolved" });
+
+    public SubmitPayloadResult ResolveManualInvocation(ResolveManualInvocation resolution)
+    {
+        LastResolve = resolution;
+        return OnResolve(resolution);
+    }
+
+    /// <summary>Unresolved pendings the dispatcher replays to a new subscriber (settable for tests).</summary>
+    public IReadOnlyList<ManualInvocationPending> Unresolved { get; set; } =
+        Array.Empty<ManualInvocationPending>();
+
+    public IReadOnlyList<ManualInvocationPending> GetUnresolvedManualInvocations() => Unresolved;
 }
 
 /// <summary>

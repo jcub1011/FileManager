@@ -44,6 +44,12 @@ public enum MessageKind
 
     /// <summary>Carries a <see cref="IpcMessage.DryRunReport"/> payload (service → client).</summary>
     DryRunReport,
+
+    /// <summary>Carries a <see cref="IpcMessage.ManualInvocationPending"/> payload (service → client, pushed).</summary>
+    ManualInvocationPending,
+
+    /// <summary>Carries a <see cref="IpcMessage.ResolveManualInvocation"/> payload (client → service).</summary>
+    ResolveManualInvocation,
 }
 
 /// <summary>
@@ -95,6 +101,12 @@ public sealed record IpcMessage
     /// <summary>The <see cref="MessageKind.DryRunReport"/> payload.</summary>
     public DryRunReport? DryRunReport { get; init; }
 
+    /// <summary>The <see cref="MessageKind.ManualInvocationPending"/> payload.</summary>
+    public ManualInvocationPending? ManualInvocationPending { get; init; }
+
+    /// <summary>The <see cref="MessageKind.ResolveManualInvocation"/> payload.</summary>
+    public ResolveManualInvocation? ResolveManualInvocation { get; init; }
+
     /// <summary>Wraps a <see cref="SubmitPayload"/> as a <see cref="MessageKind.Submit"/> envelope.</summary>
     public static IpcMessage ForSubmit(SubmitPayload payload) =>
         new() { Kind = MessageKind.Submit, Submit = payload };
@@ -142,4 +154,12 @@ public sealed record IpcMessage
     /// <summary>Wraps a <see cref="DryRunReport"/> envelope.</summary>
     public static IpcMessage ForDryRunReport(DryRunReport payload) =>
         new() { Kind = MessageKind.DryRunReport, DryRunReport = payload };
+
+    /// <summary>Wraps a <see cref="Messages.ManualInvocationPending"/> envelope (service → client push).</summary>
+    public static IpcMessage ForManualInvocationPending(ManualInvocationPending payload) =>
+        new() { Kind = MessageKind.ManualInvocationPending, ManualInvocationPending = payload };
+
+    /// <summary>Wraps a <see cref="Messages.ResolveManualInvocation"/> envelope (client → service).</summary>
+    public static IpcMessage ForResolveManualInvocation(ResolveManualInvocation payload) =>
+        new() { Kind = MessageKind.ResolveManualInvocation, ResolveManualInvocation = payload };
 }

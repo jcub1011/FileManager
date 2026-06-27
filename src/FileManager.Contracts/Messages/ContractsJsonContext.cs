@@ -39,6 +39,8 @@ namespace FileManager.Contracts.Messages;
 [JsonSerializable(typeof(DryRunDeletionDto))]
 [JsonSerializable(typeof(DryRunDispositionDto))]
 [JsonSerializable(typeof(DryRunReport))]
+[JsonSerializable(typeof(ManualInvocationPending))]
+[JsonSerializable(typeof(ResolveManualInvocation))]
 public partial class ContractsJsonContext : JsonSerializerContext
 {
 }
