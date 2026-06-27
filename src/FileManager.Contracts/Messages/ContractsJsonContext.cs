@@ -32,7 +32,12 @@ namespace FileManager.Contracts.Messages;
 [JsonSerializable(typeof(ReloadProfiles))]
 [JsonSerializable(typeof(ReloadResult))]
 [JsonSerializable(typeof(DryRunRequest))]
-[JsonSerializable(typeof(DryRunItem))]
+[JsonSerializable(typeof(DryRunMatchDto))]
+[JsonSerializable(typeof(DryRunScreenedOutDto))]
+[JsonSerializable(typeof(DryRunCommandDto))]
+[JsonSerializable(typeof(DryRunTargetWriteDto))]
+[JsonSerializable(typeof(DryRunDeletionDto))]
+[JsonSerializable(typeof(DryRunDispositionDto))]
 [JsonSerializable(typeof(DryRunReport))]
 public partial class ContractsJsonContext : JsonSerializerContext
 {

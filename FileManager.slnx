@@ -16,10 +16,12 @@
     <Project Path="src/FileManager.Contracts/FileManager.Contracts.csproj" />
     <Project Path="src/FileManager.Service/FileManager.Service.csproj" />
     <Project Path="src/FileManager.Shell/FileManager.Shell.csproj" />
+    <Project Path="src/FileManager.Gui/FileManager.Gui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/FileManager.Core.Tests/FileManager.Core.Tests.csproj" />
     <Project Path="tests/FileManager.Service.Tests/FileManager.Service.Tests.csproj" />
+    <Project Path="tests/FileManager.Gui.Tests/FileManager.Gui.Tests.csproj" />
     <Project Path="tests/FileManager.TestStub/FileManager.TestStub.csproj" />
   </Folder>
 </Solution>

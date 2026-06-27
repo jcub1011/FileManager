@@ -60,6 +60,7 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
     private IpcServer? _ipc;
     private ITrayIndicator _tray = NullTrayIndicator.Instance;
     private string _configDir = string.Empty;
+    private string _trashDirectory = string.Empty;
 
     private readonly List<SourceWatcher> _watchers = new();
     private volatile IReadOnlyList<Profile> _profiles = Array.Empty<Profile>();
@@ -118,6 +119,9 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
             StagingRoot = Path.Combine(_configDir, "staging"),
             MinFreeSpaceMarginBytes = config.MinFreeSpaceMarginBytes,
         };
+        // Remembered for the dry-run preview's MoveToTrash destination (the engine reports the local
+        // trash-fallback folder; native trash applies at execution time).
+        _trashDirectory = engineOptions.ResolveTrashDirectory();
 
         // 3. M4 crash recovery: bring any OPEN Jobs to a safe terminal state before accepting new work.
         var recovery = new RecoveryService(_journal, new RollbackEngine(_files), _files, engineOptions);
@@ -488,7 +492,75 @@ public sealed class ServiceHost : IEngineFacade, IAsyncDisposable
     }
 
     /// <inheritdoc/>
-    public DryRunReport DryRun(DryRunRequest request) => DryRunReport.NotImplemented();
+    /// <remarks>
+    /// Resolves the Profile (by <see cref="DryRunRequest.ProfileId"/>, else by matching the request path
+    /// to a Profile's owning Source), enumerates candidate files under the path read-only (respecting
+    /// <see cref="DryRunRequest.Recursive"/> for a directory), runs the side-effect-free
+    /// <see cref="FileManager.Core.Simulation.DryRunEngine"/>, and maps the domain report onto the wire
+    /// DTO. Reads only — it writes, moves, and deletes nothing. A resolution miss returns an empty,
+    /// not-implemented-marked report carrying the reason rather than throwing.
+    /// </remarks>
+    public DryRunReport DryRun(DryRunRequest request)
+    {
+        IReadOnlyList<Profile> snapshot = _profiles;
+
+        Profile? profile = ResolveDryRunProfile(snapshot, request);
+        if (profile is null)
+            return DryRunReport.Empty(request.ProfileId ?? string.Empty,
+                "No active Profile matches the requested path/ProfileId.");
+
+        IReadOnlyList<string> candidates = EnumerateDryRunCandidates(request);
+
+        string trashRoot = _trashDirectory.Length > 0
+            ? _trashDirectory
+            : Path.Combine(_configDir, "trash");
+        var engine = new FileManager.Core.Simulation.DryRunEngine(_files, trashRoot);
+        FileManager.Core.Simulation.DryRunReport domain =
+            engine.Simulate(profile, candidates, _clock.GetUtcNow());
+
+        return DryRunReportMapper.ToWire(domain);
+    }
+
+    // Resolves the Profile to preview under: the explicit ProfileId when supplied (and active/loaded),
+    // otherwise the active Profile whose Source root owns the request path (longest match wins).
+    private static Profile? ResolveDryRunProfile(IReadOnlyList<Profile> profiles, DryRunRequest request)
+    {
+        if (request.ProfileId is { Length: > 0 } id)
+            return profiles.FirstOrDefault(p => string.Equals(p.ProfileId, id, StringComparison.Ordinal));
+
+        string path = PathNormalizer.Normalize(request.Path);
+        Profile? best = null;
+        int bestRootLength = -1;
+        foreach (Profile profile in profiles)
+        {
+            foreach (SourceSpec source in profile.Sources)
+            {
+                if (!PathNormalizer.IsUnder(source.Path, path))
+                    continue;
+                int rootLength = PathNormalizer.Normalize(source.Path).Length;
+                if (rootLength > bestRootLength)
+                {
+                    best = profile;
+                    bestRootLength = rootLength;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    // Enumerates the candidate source files under the request path read-only: a single file when the
+    // path is a file, otherwise the directory's files (recursively when requested). Never mutates.
+    private IReadOnlyList<string> EnumerateDryRunCandidates(DryRunRequest request)
+    {
+        if (_files.FileExists(request.Path))
+            return new[] { request.Path };
+
+        if (_files.DirectoryExists(request.Path))
+            return _files.EnumerateFiles(request.Path, request.Recursive).ToList();
+
+        return Array.Empty<string>();
+    }
 
     // Loads Profiles from disk under the host's config dir, swaps the active snapshot to the valid +
     // active ones, and returns per-file error strings. Used at startup and by the reload IPC.

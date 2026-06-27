@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FileManager.Gui.ViewModels"
+             x:Class="FileManager.Gui.Views.ActivityView"
+             x:DataType="vm:ActivityViewModel">
+  <Grid ColumnDefinitions="*,2*" Margin="10" ColumnSpacing="10">
+    <DockPanel Grid.Column="0">
+      <TextBlock DockPanel.Dock="Top" Text="Recent Jobs" FontWeight="Bold" Margin="0,0,0,6" />
+      <ListBox ItemsSource="{Binding Jobs}" SelectedItem="{Binding SelectedJob}">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:ActivityItemViewModel">
+            <StackPanel>
+              <TextBlock Text="{Binding ProfileId}" FontWeight="Bold" />
+              <TextBlock Text="{Binding State}" />
+              <TextBlock Text="{Binding Message}" Foreground="#9FB3C8" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </DockPanel>
+
+    <DockPanel Grid.Column="1">
+      <TextBlock DockPanel.Dock="Top" Text="Job log" FontWeight="Bold" Margin="0,0,0,6" />
+      <ItemsControl ItemsSource="{Binding SelectedJob.Log}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="x:String">
+            <TextBlock Text="{Binding}" FontFamily="Cascadia Code,Consolas,monospace" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </DockPanel>
+  </Grid>
+</UserControl>
