@@ -74,15 +74,18 @@ public sealed class SingleInstanceGuardTests
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return;
 
-        // A GENUINE stale socket: bind (which creates the socket file) but never Listen, then close —
-        // a connect now fails with ConnectionRefused, the signal of a crashed prior instance.
+        // A GENUINE stale socket = a socket inode on disk with no listener, as a crashed instance would
+        // leave behind. NOTE: .NET unlinks its own bound Unix-domain-socket file on Dispose, so a
+        // bind-then-Dispose leaves NO file. To present a real leftover socket inode we keep the socket
+        // BOUND-but-never-Listen and alive across the probe: the file exists on disk and a connect()
+        // gets ConnectionRefused — exactly the crashed-prior-instance signal the guard must clear.
+        // (Deleting the path while our fd stays open is a normal unlink-while-open on Linux.)
         string socketPath = Path.Combine(Path.GetTempPath(), $"fm-stale-{Guid.NewGuid():N}.sock");
-        var bound = new System.Net.Sockets.Socket(
+        using var bound = new System.Net.Sockets.Socket(
             System.Net.Sockets.AddressFamily.Unix,
             System.Net.Sockets.SocketType.Stream,
             System.Net.Sockets.ProtocolType.Unspecified);
-        bound.Bind(new System.Net.Sockets.UnixDomainSocketEndPoint(socketPath));
-        bound.Dispose(); // file remains on disk, but nothing is listening.
+        bound.Bind(new System.Net.Sockets.UnixDomainSocketEndPoint(socketPath)); // never Listen, never Dispose yet.
 
         try
         {
