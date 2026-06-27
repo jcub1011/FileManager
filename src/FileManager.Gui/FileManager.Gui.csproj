@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FileManager.Gui</RootNamespace>
+    <AssemblyName>FileManager.Gui</AssemblyName>
+
+    <!--
+      Avalonia + the XAML compiler trip the trim/AOT analyzers (reflection in the framework's
+      published-app path). This desktop app is NOT an AOT-publish target, so we scope
+      IsAotCompatible=false to this project only (matching the test projects). Core and Contracts
+      stay AOT-clean. This keeps the build at 0 warnings without suppressing any real analyzer finding.
+    -->
+    <IsAotCompatible>false</IsAotCompatible>
+
+    <!-- Compiled bindings by default: no reflection-based XAML bindings. -->
+    <AvaloniaXamlIlCompiledBindingsByDefault>true</AvaloniaXamlIlCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FileManager.Core\FileManager.Core.csproj" />
+    <ProjectReference Include="..\FileManager.Contracts\FileManager.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

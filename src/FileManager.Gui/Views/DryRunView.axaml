@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FileManager.Gui.ViewModels"
+             xmlns:msg="using:FileManager.Contracts.Messages"
+             x:Class="FileManager.Gui.Views.DryRunView"
+             x:DataType="vm:DryRunViewModel">
+  <DockPanel Margin="10">
+    <StackPanel DockPanel.Dock="Top" Spacing="6">
+      <TextBlock Text="Dry-run preview" FontSize="18" FontWeight="Bold" />
+      <Grid ColumnDefinitions="80,*,Auto,Auto" ColumnSpacing="8">
+        <TextBlock Grid.Column="0" Text="Path" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" Text="{Binding Path}" PlaceholderText="File or directory to preview" />
+        <CheckBox Grid.Column="2" Content="Recursive" IsChecked="{Binding Recursive}" />
+        <Button Grid.Column="3" Content="Run" Command="{Binding RunCommand}" IsEnabled="{Binding !IsRunning}" />
+      </Grid>
+      <TextBlock Text="{Binding Status}" Foreground="#9FB3C8" />
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel Spacing="10">
+        <TextBlock Text="Matches (deciding filter)" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding Matches}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunMatchDto">
+              <TextBlock Text="{Binding SourcePath}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Screened out" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding ScreenedOut}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunScreenedOutDto">
+              <TextBlock Text="{Binding SourcePath}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Transformer commands" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding Commands}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunCommandDto">
+              <TextBlock Text="{Binding ExecutablePath}" FontFamily="Cascadia Code,Consolas,monospace" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Target writes" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding TargetWrites}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunTargetWriteDto">
+              <TextBlock Text="{Binding FinalPath}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Deletions (Mirror)" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding Deletions}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunDeletionDto">
+              <TextBlock Text="{Binding FilePath}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Source disposition" FontWeight="Bold" />
+        <ItemsControl ItemsSource="{Binding Dispositions}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="msg:DryRunDispositionDto">
+              <TextBlock Text="{Binding SourcePath}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

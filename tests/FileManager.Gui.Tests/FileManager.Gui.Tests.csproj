@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FileManager.Gui.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Test assemblies are not AOT-published; the test runner uses reflection. -->
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The GUI under test, plus the Service (only to stand up a real in-process IpcServer for the
+      IpcClient round-trip tests) and the shared Contracts/Core. NO Avalonia app is started and NO
+      controls are rendered — only view-models (CommunityToolkit POCOs) and the IpcClient are exercised,
+      so the suite needs no display server and runs identically on Windows and Linux CI.
+    -->
+    <ProjectReference Include="..\..\src\FileManager.Gui\FileManager.Gui.csproj" />
+    <ProjectReference Include="..\..\src\FileManager.Service\FileManager.Service.csproj" />
+    <ProjectReference Include="..\..\src\FileManager.Contracts\FileManager.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\FileManager.Core\FileManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

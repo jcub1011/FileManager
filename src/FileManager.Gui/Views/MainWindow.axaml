@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FileManager.Gui.ViewModels"
+        xmlns:views="using:FileManager.Gui.Views"
+        x:Class="FileManager.Gui.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="900" Height="640"
+        Title="FileManager">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="10" Background="#202830">
+      <StackPanel Orientation="Horizontal" Spacing="16">
+        <TextBlock Text="FileManager" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding ConnectionStatus}" Foreground="#9FB3C8" VerticalAlignment="Center" />
+        <Button Content="Refresh" Command="{Binding RefreshStateCommand}" />
+      </StackPanel>
+    </Border>
+
+    <TabControl SelectedIndex="{Binding SelectedTab}">
+      <TabItem Header="Profile">
+        <views:ProfileEditorView DataContext="{Binding Editor}" />
+      </TabItem>
+      <TabItem Header="Activity">
+        <views:ActivityView DataContext="{Binding Activity}" />
+      </TabItem>
+      <TabItem Header="Dry-run">
+        <views:DryRunView DataContext="{Binding DryRun}" />
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>

@@ -1,0 +1,90 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FileManager.Gui.ViewModels"
+             x:Class="FileManager.Gui.Views.ProfileEditorView"
+             x:DataType="vm:ProfileEditorViewModel">
+  <ScrollViewer Padding="14">
+    <StackPanel Spacing="10">
+      <TextBlock Text="Profile" FontSize="18" FontWeight="Bold" />
+
+      <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Name}" />
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Profile id" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProfileId}" IsReadOnly="True" />
+        <CheckBox Grid.Row="2" Grid.Column="1" Content="Active" IsChecked="{Binding Active}" />
+      </Grid>
+
+      <!-- Destructive Mirror flag (§3.1.1). -->
+      <Border IsVisible="{Binding IsDestructiveMirror}" Background="#5A2A00" CornerRadius="4" Padding="8">
+        <TextBlock Foreground="#FFD8A8"
+                   Text="Mirror is destructive: Target files with no matching Source are moved to Trash." />
+      </Border>
+
+      <TextBlock Text="Sources" FontWeight="Bold" />
+      <ItemsControl ItemsSource="{Binding Sources}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:PathRowViewModel">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2" ColumnSpacing="6">
+              <TextBox Grid.Column="0" Text="{Binding Path}" PlaceholderText="Source directory" />
+              <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseCommand}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <Button Content="Add Source" Command="{Binding AddSourceCommand}" />
+
+      <TextBlock Text="Targets" FontWeight="Bold" />
+      <ItemsControl ItemsSource="{Binding Targets}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:PathRowViewModel">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2" ColumnSpacing="6">
+              <TextBox Grid.Column="0" Text="{Binding Path}" PlaceholderText="Target directory" />
+              <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseCommand}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <Button Content="Add Target" Command="{Binding AddTargetCommand}" />
+
+      <TextBlock Text="Policies" FontWeight="Bold" />
+      <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Verification" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="0" Grid.Column="1" SelectedItem="{Binding VerificationMethod}" />
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="On success" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="1" Grid.Column="1" SelectedItem="{Binding OnSuccess}" />
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Conflict" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="2" Grid.Column="1" SelectedItem="{Binding ConflictResolution}" />
+        <CheckBox Grid.Row="3" Grid.Column="1" Content="Notify on failure" IsChecked="{Binding NotifyOnFailure}" />
+      </Grid>
+
+      <!-- §6.1 non-blocking warning (None + MoveToTrash). -->
+      <Border IsVisible="{Binding IsWarning}" Background="#3A3A00" CornerRadius="4" Padding="8">
+        <TextBlock Foreground="#FFF3A8" Text="{Binding SafetyMessage}" TextWrapping="Wrap" />
+      </Border>
+
+      <!-- §6.1 BLOCKING warning (None + PermanentDelete): Save disabled until acknowledged. -->
+      <Border IsVisible="{Binding IsBlocking}" Background="#5A0000" CornerRadius="4" Padding="8">
+        <StackPanel Spacing="6">
+          <TextBlock Foreground="#FFB3B3" FontWeight="Bold" Text="{Binding SafetyMessage}" TextWrapping="Wrap" />
+          <CheckBox Foreground="#FFB3B3"
+                    Content="I understand this can permanently lose data — let me save anyway."
+                    IsChecked="{Binding BlockingRiskAcknowledged}" />
+        </StackPanel>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding ValidationErrors}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="x:String">
+            <TextBlock Foreground="#FF8080" Text="{Binding}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <Button Content="Save" Command="{Binding SaveCommand}" />
+        <TextBlock Text="{Binding SaveStatus}" VerticalAlignment="Center" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

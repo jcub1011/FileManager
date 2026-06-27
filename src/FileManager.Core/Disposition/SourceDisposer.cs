@@ -10,6 +10,21 @@ namespace FileManager.Core.Disposition;
 public sealed record DispositionOutcome(OnSuccess Action, string? ResultPath);
 
 /// <summary>
+/// The pure, side-effect-free decision of what a Phase 6 disposition <b>would</b> do to a source file:
+/// the <see cref="OnSuccess"/> action and, for the move dispositions, the destination <em>folder</em>
+/// the file would land in. It deliberately does not resolve the final collision-suffixed file name
+/// (that requires probing the filesystem at execution time) — it captures the policy decision, not the
+/// I/O. Shared by the live <see cref="SourceDisposer"/> and the M7 dry-run so the preview cannot drift
+/// from reality.
+/// </summary>
+/// <param name="Action">The disposition action that would run.</param>
+/// <param name="DestinationFolder">
+/// The folder a <see cref="OnSuccess.MoveToTrash"/> / <see cref="OnSuccess.MoveToArchive"/> would move
+/// the file into; null for <see cref="OnSuccess.KeepSource"/> and <see cref="OnSuccess.PermanentDelete"/>.
+/// </param>
+public sealed record DispositionDecision(OnSuccess Action, string? DestinationFolder);
+
+/// <summary>
 /// Phase 6 source disposition (§4) per <see cref="OnSuccess"/>.
 /// </summary>
 /// <remarks>
@@ -34,6 +49,28 @@ public sealed class SourceDisposer : ISourceDisposer
     }
 
     /// <summary>
+    /// The pure decision of what <see cref="Dispose"/> <b>would</b> do for these policies, without
+    /// performing (or planning the precise collision-suffixed name of) any move/delete. The live
+    /// <see cref="Dispose"/> below is implemented in terms of these same branches, and the M7 dry-run
+    /// calls this directly, so the preview and the real disposition can never disagree about the action
+    /// or the destination folder. A native <see cref="ITrashService"/>'s exact trashed path is not
+    /// knowable up front, so a trash decision reports the local-fallback <paramref name="trashRoot"/>
+    /// folder as the destination (the engine notes the native Recycle Bin / FreeDesktop Trash applies).
+    /// </summary>
+    public static DispositionDecision PreviewDisposition(PolicySet policies, string trashRoot) =>
+        policies.OnSuccess switch
+        {
+            OnSuccess.KeepSource => new DispositionDecision(OnSuccess.KeepSource, null),
+            OnSuccess.PermanentDelete => new DispositionDecision(OnSuccess.PermanentDelete, null),
+            OnSuccess.MoveToArchive => new DispositionDecision(
+                OnSuccess.MoveToArchive,
+                policies.ArchiveFolder
+                    ?? throw new InvalidOperationException("MoveToArchive requires ArchiveFolder.")),
+            OnSuccess.MoveToTrash => new DispositionDecision(OnSuccess.MoveToTrash, trashRoot),
+            _ => new DispositionDecision(policies.OnSuccess, null),
+        };
+
+    /// <summary>
     /// Applies the disposition. <paramref name="trashRoot"/> is the placeholder trash folder used for
     /// <see cref="OnSuccess.MoveToTrash"/>; <paramref name="now"/> stamps the trashed name.
     /// </summary>
@@ -43,7 +80,12 @@ public sealed class SourceDisposer : ISourceDisposer
         string trashRoot,
         DateTimeOffset now)
     {
-        switch (policies.OnSuccess)
+        // The POLICY decision (which action, and the destination folder for a move — including the
+        // MoveToArchive ArchiveFolder requirement) lives in exactly ONE place: the shared
+        // PreviewDisposition. This method only performs the I/O for that decision, so the live disposer
+        // and the M7 dry-run can never diverge on what an OnSuccess policy means.
+        DispositionDecision decision = PreviewDisposition(policies, trashRoot);
+        switch (decision.Action)
         {
             case OnSuccess.KeepSource:
                 return new DispositionOutcome(OnSuccess.KeepSource, sourcePath);
@@ -53,9 +95,8 @@ public sealed class SourceDisposer : ISourceDisposer
                 return new DispositionOutcome(OnSuccess.PermanentDelete, null);
 
             case OnSuccess.MoveToArchive:
-                string archive = policies.ArchiveFolder
-                    ?? throw new InvalidOperationException("MoveToArchive requires ArchiveFolder.");
-                string archived = MoveInto(sourcePath, archive, prefix: null);
+                // DestinationFolder is non-null here: PreviewDisposition already enforced ArchiveFolder.
+                string archived = MoveInto(sourcePath, decision.DestinationFolder!, prefix: null);
                 return new DispositionOutcome(OnSuccess.MoveToArchive, archived);
 
             case OnSuccess.MoveToTrash:
@@ -67,13 +108,14 @@ public sealed class SourceDisposer : ISourceDisposer
                     return new DispositionOutcome(OnSuccess.MoveToTrash, result.TrashedPath);
                 }
 
-                // Local-folder fallback (no native trash injected). Stamp to keep trashed names unique.
+                // Local-folder fallback (no native trash injected). The decision's DestinationFolder is
+                // the trash root; stamp to keep trashed names unique.
                 string stamp = now.UtcDateTime.ToString("yyyyMMdd-HHmmss");
-                string trashed = MoveInto(sourcePath, trashRoot, prefix: stamp + "-");
+                string trashed = MoveInto(sourcePath, decision.DestinationFolder ?? trashRoot, prefix: stamp + "-");
                 return new DispositionOutcome(OnSuccess.MoveToTrash, trashed);
 
             default:
-                return new DispositionOutcome(policies.OnSuccess, sourcePath);
+                return new DispositionOutcome(decision.Action, sourcePath);
         }
     }
 
