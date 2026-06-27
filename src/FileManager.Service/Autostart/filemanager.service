@@ -1,0 +1,12 @@
+[Unit]
+Description=FileManager per-user file-automation service
+After=default.target
+
+[Service]
+Type=simple
+ExecStart={ExecStart}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FileManager.Service</RootNamespace>
+    <AssemblyName>FileManager.Service</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    The headless Core Service host (M6): wires the engine + watchers + scheduler + worker pool +
+    journal recovery and exposes the per-user IPC endpoint. Deliberately dependency-free beyond the
+    BCL: no Microsoft.Extensions.Hosting / DI container / NuGet package, so the whole executable stays
+    AOT-clean. JSON goes through the source-generated ContractsJsonContext in FileManager.Contracts.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\FileManager.Core\FileManager.Core.csproj" />
+    <ProjectReference Include="..\FileManager.Contracts\FileManager.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Autostart\filemanager.service" />
+  </ItemGroup>
+
+</Project>
